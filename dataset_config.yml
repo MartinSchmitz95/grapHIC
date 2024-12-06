@@ -1,0 +1,33 @@
+paths:
+  sample_profile: hg002hifi
+  pbsim_path: /home/schmitzmf/pbsim3
+  hifiasm_path: /home/schmitzmf/hifiasm_020/
+  raven_path: /home/schmitzmf/heron-raven
+  herro_path: /home/schmitzmf/herro_folder
+  hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_1
+  raft_path: /home/schmitzmf/RAFT
+  yak_path: /home/schmitzmf/yak
+  centromere_coords: /home/schmitzmf/diploid_gnnome/data/centromere_coordinates_same_len.yml
+gen_config:
+  depth: 20
+  threads: 32
+  assembler: hifiasm
+  diploid: True
+  real: False
+  prep_decoding: False
+  raft: True
+gen_steps:
+  sample_reads: False
+  create_graphs: True
+  parse_gfa: True
+  pile-o-gram: True
+  create_yak: True
+  diploid_features: True
+  ground_truth: True
+  ml_graphs: True
+
+training:
+  i002c_v04.chr19: 17
+  
+validation:
+  i002c_v04.chr19: 3

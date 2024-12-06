@@ -1,0 +1,18 @@
+training:
+  seed: 1
+  num_epochs: 200
+  num_gnn_layers: 12
+  num_trans_layers: 1
+  hidden_features: 256
+  node_features: 5
+  gnn_dropout: 0.5
+  lr: 0.0001
+  wandb_mode: 'online'
+  decay: 0.95
+  patience: 2
+
+
+
+paths:
+  minigraph_path: '/home/schmitzmf/minigraph/minigraph'
+  paftools_path: '/home/schmitzmf/minimap2/misc/paftools.js'
