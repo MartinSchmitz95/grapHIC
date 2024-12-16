@@ -35,7 +35,7 @@ def aggr_chrs(in_path: str) -> Cooler:
     return Cooler(tmp)
 
 
-def to_np_matrix(in_cooler: Cooler, balance=True) -> Tuple[np.array, np.ndarray]:
+def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray]:
     """
     Extracts the data in a cooler aggregated by chromosomes into a numpy matrix.
     If `balance` is set to `True`, use weights (need to be computed by 
