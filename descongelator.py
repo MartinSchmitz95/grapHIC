@@ -51,7 +51,7 @@ def to_np_matrix(in_cooler: Cooler) -> Tuple[np.array, np.ndarray]:
     return (chrnames, array)
 
 def save_np_matrix(intuple, path, sep='\t'):
-    np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header='#' + sep.join(intuple[0]))
+    np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
 
 
 def main(args):
