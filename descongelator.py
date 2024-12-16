@@ -35,18 +35,26 @@ def aggr_chrs(in_path: str) -> Cooler:
     return Cooler(tmp)
 
 
-def to_np_matrix(in_cooler: Cooler) -> Tuple[np.array, np.ndarray]:
+def to_np_matrix(in_cooler: Cooler, balance=True) -> Tuple[np.array, np.ndarray]:
     """
     Extracts the data in a cooler aggregated by chromosomes into a numpy matrix.
+    If `balance` is set to `True`, use weights (need to be computed by 
     :returns: a tuple of a 1D numpy array containing chromosome labels and a 2D array containing counts between chromosomes.
     """
+    if balance:
+        cooler.balance_cooler(in_cooler, store=True)
+
     # this returns it in a bit of a weird format, necessitating [:]
     # could also call fetch(chr, 0, 1) in a loop, but I think this is neater
-    array = np.array(in_cooler.matrix(balance=False)[:])
+    array = np.array(in_cooler.matrix(balance=balance)[:])
     chrnames = np.array(in_cooler.chromnames)
 
     if len(array) != len(chrnames):
         raise ValueError("Labels not same length as array! Might not have been aggregated by Chr.")
+    
+    # using the weights seems to induce NaN values in the sex chrs, as they have 0 counts
+    # set these to 0 manually
+    np.nan_to_num(array, copy=False)
 
     return (chrnames, array)
 
