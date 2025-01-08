@@ -5,6 +5,7 @@ import tempfile
 import math
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from typing import Tuple
 
@@ -61,6 +62,10 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
 def save_np_matrix(intuple, path, sep='\t'):
     np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
 
+def export_image(inptuple, path):
+    plt.imsave(path, intuple[1].astype(np.int64))
+
+
 
 def main(args):
     #TODO do proper argparsing later
@@ -71,9 +76,11 @@ def main(args):
             aggr_chrs(infile)
             )
 
-    print(np_tup)
+    #print(np_tup)
 
     save_np_matrix(np_tup, outfile)
+
+    plt.imsave(np_tup, outfile + ".png")
 
 
 
