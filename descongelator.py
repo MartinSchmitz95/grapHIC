@@ -63,7 +63,11 @@ def save_np_matrix(intuple, path, sep='\t'):
     np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
 
 def export_image(intuple, path, scale=id):
-    print(scale(intuple[1]))
+    """
+    Plots the interchromosomal contacts given by `intuple` as an image that is saved at `path`.
+    Applies a scaling function passed as `scale` to the matrix first.
+    The default is the identity, but other scaling factors can be passed as a lambda (e.g. `lambda x: np.log(x+1)` for log scaling with a pseudocount of 1).
+    """
     plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
 
