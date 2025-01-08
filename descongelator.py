@@ -62,8 +62,9 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
 def save_np_matrix(intuple, path, sep='\t'):
     np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
 
-def export_image(inptuple, path):
-    plt.imsave(path, intuple[1].astype(np.int64))
+def export_image(intuple, path, scale=id):
+    print(scale(intuple[1]))
+    plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
 
 
@@ -80,7 +81,7 @@ def main(args):
 
     save_np_matrix(np_tup, outfile)
 
-    plt.imsave(np_tup, outfile + ".png")
+    export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
 
 
 
