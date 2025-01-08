@@ -6,27 +6,25 @@ paths:
   herro_path: /home/schmitzmf/herro_folder
   hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_4
   raft_path: /home/schmitzmf/RAFT
-  yak_path: /home/schmitzmf/yak
   centromere_coords: /home/schmitzmf/diploid_gnnome/data/centromere_coordinates_same_len.yml
 gen_config:
-  depth: 1
+  depth: 20
   threads: 16
   assembler: hifiasm
   diploid: True
   real: False
   prep_decoding: False
-  raft: True
+  raft: False
 gen_steps:
   sample_reads: True
   create_graphs: True
-  parse_gfa: True
+  parse_gfa: False
   pile-o-gram: False
-  create_yak: True
-  diploid_features: True
-  ground_truth: True
-  ml_graphs: True
+  diploid_features: False
+  ground_truth: False
+  ml_graphs: False
 
 training:
-  i002c_v04.multi_5: 1
+  i002c_v04.multi_10: 100
 validation:
   i002c_v04.multi_5: 0

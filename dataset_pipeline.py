@@ -2,12 +2,9 @@ import os
 import subprocess
 import pickle
 import gzip
-import edlib
 import networkx as nx
 import torch
 import yaml
-from pyliftover import LiftOver
-import pandas as pd
 from tqdm import tqdm
 import dgl
 import shutil
@@ -16,12 +13,14 @@ import numpy as np
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
-#from torch_geometric.utils import from_dgl
-from collections import deque, defaultdict
+from torch_geometric.utils import from_networkx
 from tqdm import tqdm  
-import random
-from multiprocessing import Pool, Manager
-import itertools
+from multiprocessing import Pool
+import argparse
+from Bio import AlignIO
+import re
+from datetime import datetime
+import pandas as pd
 
 class HicDatasetCreator:
     def __init__(self, ref_path, dataset_path, data_config='dataset.yml'):
@@ -37,10 +36,8 @@ class HicDatasetCreator:
         self.load_chromosome("", "", ref_path)
         self.hifiasm_path = self.paths['hifiasm_path']
         self.hifiasm_dump = self.paths['hifiasm_dump']
-        self.raven_path = self.paths['raven_path']
         self.raft_path = self.paths['raft_path']
-        self.yak_path = self.paths['yak_path']
-
+        self.pbsim_path = self.paths['pbsim_path']
         self.sample_profile = self.paths['sample_profile']
         self.depth = gen_config['depth']
         self.diploid = gen_config['diploid']
@@ -53,10 +50,15 @@ class HicDatasetCreator:
         self.tmp_path = os.path.join(dataset_path, 'tmp')
         self.full_reads_path = os.path.join(dataset_path, "full_reads")
         self.read_descr_path = os.path.join(dataset_path, "read_descr")
-        self.gfa_graphs_path = os.path.join(dataset_path, "gfa_graphs")
+        self.gfa_unitig_path = os.path.join(dataset_path, "gfa_unitig")
+        self.fasta_unitig_path = os.path.join(dataset_path, "fasta_unitig")
+        self.fasta_raw_path = os.path.join(dataset_path, "fasta_raw")
+        self.gfa_raw_path = os.path.join(dataset_path, "gfa_raw")
+        self.overlaps_path = os.path.join(dataset_path, "overlaps")
+        self.pile_o_grams_path = os.path.join(dataset_path, "pile_o_grams")
+
         self.nx_graphs_path = os.path.join(dataset_path, "nx_graphs")
         self.pyg_graphs_path = os.path.join(dataset_path, "pyg_graphs")
-        self.paf_path = os.path.join(dataset_path, "paf")
         self.read_to_node_path = os.path.join(dataset_path, "read_to_node")
         self.node_to_read_path = os.path.join(dataset_path, "node_to_read")
 
@@ -64,17 +66,15 @@ class HicDatasetCreator:
         self.gt_rescue = {}
         self.edge_info = {}
 
-        for folder in [self.full_reads_path, self.gfa_graphs_path, self.nx_graphs_path, self.dgl_graphs_path,
-                       self.pyg_graphs_path, self.read_descr_path, self.paf_path, self.tmp_path, self.yak_files_path, self.original_reads_path, self.read_to_node_path, self.node_to_read_path]:
+        for folder in [self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
+                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.read_to_node_path, self.node_to_read_path, self.overlaps_path, self.pile_o_grams_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
-        self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
+        #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
         self.node_attrs = ['read_length']
         if not self.real:
             self.node_attrs.extend('gt_hap')
-            add_edge_attrs = ['strand_change', 'skip_forward', 'skip_backward', 'cross_chr', 'gt_bin'] #'gt_17c', 
-            self.edge_attrs.extend(add_edge_attrs)
 
     def load_chromosome(self, genome, chr_id, ref_path):
         self.genome_str = f'{genome}_{chr_id}'
@@ -150,22 +150,13 @@ class HicDatasetCreator:
                 return {read.id: read.description for read in SeqIO.parse(handle, filetype)}
         else:
             return {read.id: read.description for read in SeqIO.parse(reads_path, filetype)}
-        
-    def load_fasta(self, file_path, dict=False):
-        """Load sequences from a FASTA/FASTQ file, handling both compressed and uncompressed files.
-        Returns a list of SeqRecord objects or dict mapping ids to sequences if dict=True."""
-        filetype = self._get_filetype(file_path)
-        if file_path.endswith('.gz'):
-            with gzip.open(file_path, 'rt') as handle:
-                records = SeqIO.parse(handle, filetype)
-                if dict:
-                    return {record.id: record.seq for record in records}
-                return list(records)
-        else:
-            records = SeqIO.parse(file_path, filetype)
-            if dict:
-                return {record.id: record.seq for record in records}
-            return list(records)
+    
+    def load_nx_graph(self):
+        file_name = os.path.join(self.nx_graphs_path, f'{self.genome_str}.pkl')
+        with open(file_name, 'rb') as file:
+            nx_graph = pickle.load(file)
+        print(f"Loaded nx graph {self.genome_str}")
+        return nx_graph
         
     def create_reads_fasta(self, read_seqs, chr_id):
         seq_records = []
@@ -175,69 +166,35 @@ class HicDatasetCreator:
         seq_record_path = os.path.join(self.reduced_reads_path, f'{self.genome_str}.fasta')
         SeqIO.write(seq_records, seq_record_path, "fasta")
 
+    def pickle_save(self, pickle_object, path):
+        # Save the graph using pickle
+        file_name = os.path.join(path, f'{self.genome_str}.pkl')
+        with open(file_name, 'wb') as f:
+            pickle.dump(pickle_object, f) 
+        print(f"File saved successfully to {file_name}")
 
     def save_to_dgl_and_pyg(self, nx_graph):
-        #self.positional_node_ftrs(nx_graph)
         print()
         print(f"Total nodes in graph: {nx_graph.number_of_nodes()}")
-        yak_labels = nx.get_node_attributes(nx_graph, 'yak_m')
-        print(f"Number of nodes with yak labels: {len(yak_labels)}")
-        graph_dgl = dgl.from_networkx(nx_graph, node_attrs=self.node_attrs, edge_attrs=self.edge_attrs)
-        dgl.save_graphs(os.path.join(self.dgl_graphs_path, f'{self.genome_str}.dgl'), graph_dgl)
-        print(f"Saved DGL graph of {self.genome_str}")
-        '''pyg_data = from_dgl(graph_dgl) 
-        # save pyggraph
-        pyg_file = os.path.join(self.pyg_graphs_path, f'{self.genome_str}.pt')
-        torch.save(pyg_data, pyg_file)'''
-
-
-    def parse_read(self, read):
-            if self.real:
-                id = read.id
-                train_desc = ""
-            else:
-                description = read.description.split()
-                id = description[0]
-                train_desc = read.description
-
-            seqs = (str(read.seq), str(Seq(read.seq).reverse_complement()))
-            return id, seqs, train_desc 
         
-    def parse_fasta(self):
-        print("Parsing FASTA...")
-        path = os.path.join(self.raft_reads_path, f'{self.genome_str}.reads.fasta')
-        data, train_data = {}, {}
-        try:
-            with open(path, 'rt') as handle:
-                rows = list(SeqIO.parse(handle, 'fasta'))
-
-            with Pool(15) as pool:
-                results = pool.imap_unordered(self.parse_read, rows, chunksize=50)
-                for id, seqs, train_desc in tqdm(results, total=len(rows), ncols=120):
-                    data[id] = seqs
-
-                    #if not self.real:
-                    #    train_data[id] = train_desc
-
-            with open(os.path.join(self.full_reads_path, f"{self.genome_str}.pkl"), "wb") as p:
-                pickle.dump(data, p)
-
-        except Exception as e:
-            print(f"An error occurred while parsing the FASTA file: {str(e)}")
-            raise
-
-        #return data#, train_data
-
-    def simulate_reads(self):
-        if not self.real:
-            self.simulate_pbsim_reads()
-        if self.raft:
-            self.run_raft()
-            if not self.real:
-                self.raft_process_fasta_files()
-        if self.prep_decoding:
-            # Save the dictionary as a pickle file
-            self.parse_fasta()
+        # Get list of available node attributes in the graph
+        available_attrs = []
+        if len(nx_graph.nodes) > 0:
+            sample_node = list(nx_graph.nodes)[0]
+            available_attrs = list(nx_graph.nodes[sample_node].keys())
+        
+        # Filter node_attrs to only include attributes that exist in the graph
+        node_attrs_to_use = [attr for attr in self.node_attrs if attr in available_attrs]
+        
+        print(f"Using node attributes: {node_attrs_to_use}")
+        
+        # Create PyG graph directly from networkx
+        pyg_data = from_networkx(nx_graph, group_node_attrs=node_attrs_to_use)
+        
+        # Save PyG graph
+        pyg_file = os.path.join(self.pyg_graphs_path, f'{self.genome_str}.pt')
+        torch.save(pyg_data, pyg_file)
+        print(f"Saved PyG graph of {self.genome_str}")
 
     def simulate_pbsim_reads(self):
         if self.diploid:
@@ -338,55 +295,45 @@ class HicDatasetCreator:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
 
-    def parse_sequence_header(self, header):
-        match = re.match(r"read=\d+,(\d+),pos_on_original_read=(\d+)-(\d+)", header)
-        if match:
-            return int(match.group(1)), int(match.group(2)), int(match.group(3))
-        return None, None, None
-
-    def parse_description_header(self, header):
-        match = re.match(r"(\d+) strand=(.) start=(\d+) end=(\d+) variant=(\w+) chr=(.+)", header)
-        if match:
-            return {
-                "id": int(match.group(1)),
-                "strand": match.group(2),
-                "start": int(match.group(3)),
-                "end": int(match.group(4)),
-                "variant": match.group(5),
-                "chr": match.group(6)
-            }
-        print(f"Failed to parse header: {header}", file=sys.stderr)
-        return None
-
     def run_raft(self):
         if self.real:
             reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
         else:
             reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
-        if self.diploid:
-            raft_depth = 2 * self.depth
-        else:
-            raft_depth = self.depth
-        # Step 1: Run hifiasm for error correction
-        ec_prefix = os.path.join(self.hifiasm_dump, f"{self.genome_str}_ec")
-        if self.real:
-            subprocess.run(f"{self.hifiasm_path}/hifiasm -o {ec_prefix} -t{self.threads} --write-ec {reads_file}", shell=True, check=True)
-            #exit()
-            # Move error-corrected reads to permanent storage
-            ec = os.path.join(self.full_reads_ec_path, f"{ec_prefix}_ec.fa")
-            shutil.move(f"{ec_prefix}.ec.fa", ec)
-            # Gzip the error-corrected reads file
-            subprocess.run(f"gzip -f {ec}", shell=True, check=True)
-            reads_file = ec + '.gz'
+        raft_depth = 2 * self.depth
 
-        # Step 2: Run hifiasm to obtain all-vs-all read overlaps
-        ov_prefix = os.path.join(self.hifiasm_dump, f"getOverlaps")
-        #ec_reads = os.path.join(self.full_reads_ec_path, f"{self.genome_str}_ec.fa")
-        #subprocess.run(f"{self.hifiasm_path}/hifiasm -o {ov_prefix} -r 1 -t{self.threads} --dbg-ovec {ec_reads}", shell=True, check=True)
-        subprocess.run(f"{self.hifiasm_path}/hifiasm -o {ov_prefix} -r 3 -t{self.threads} --dbg-ovec {reads_file}", shell=True, check=True)
+        overlaps_file = os.path.join(self.overlaps_path, f"{self.genome_str}_ov.paf.gz")  
+        #overlaps_file = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf.gz")
+
+        # Step 2: Run RAFT to create pil-o-gram
+        frag_prefix = os.path.join(self.tmp_path, 'raft_out')
+        pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 100000 {reads_file} {overlaps_file}", shell=True, check=True)
+        shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
+
+    def create_graphs(self):
+        if self.real:
+            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
+        else:
+            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
+
+        gfa_unitig_output = os.path.join(self.gfa_unitig_path, f'{self.genome_str}.gfa')
+        gfa_raw_output = os.path.join(self.gfa_raw_path, f'{self.genome_str}.gfa')
+
+        subprocess.run(f'./hifiasm --prt-raw --dbg-ovec -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {full_fasta}', shell=True, cwd=self.hifiasm_path)
+        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.raw.r_utg.gfa {gfa_raw_output}', shell=True, cwd=self.hifiasm_path)
+        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
+
+            # Convert GFA to FASTA
+        awk_command = "awk '/^S/{print \">\"$2;print $3}'"
+        subprocess.run(f"{awk_command} {gfa_unitig_output} > {self.fasta_unitig_path}/{self.genome_str}.fasta", shell=True, check=True)
+        print(f"Converted and moved {gfa_unitig_output} to {self.fasta_unitig_path}/{self.genome_str}.fasta")
+        subprocess.run(f"{awk_command} {gfa_raw_output} > {self.fasta_raw_path}/{self.genome_str}.fasta", shell=True, check=True)
+        print(f"Converted and moved {gfa_raw_output} to {self.fasta_raw_path}/{self.genome_str}.fasta")
+
         # Merge cis and trans overlaps
-        cis_paf = f"{ov_prefix}.0.ovlp.paf"
-        trans_paf = f"{ov_prefix}.1.ovlp.paf"
+        cis_paf = f"{self.hifiasm_dump}/tmp_asm.0.ovlp.paf"
+        trans_paf = f"{self.hifiasm_dump}/tmp_asm.1.ovlp.paf"
         merged_paf = os.path.join(self.overlaps_path, f"{self.genome_str}_ov.paf")  
         cis_paf_path = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf")
         with gzip.open(merged_paf + '.gz', 'wt') as outfile:
@@ -394,198 +341,51 @@ class HicDatasetCreator:
                 if os.path.exists(paf_file):
                     with open(paf_file, 'r') as infile:
                         outfile.write(infile.read())
-        print(f"Merged overlaps saved to: {merged_paf}")
-        shutil.move(cis_paf, cis_paf_path)
-        
-        # Step 3: Run RAFT to fragment the error-corrected reads
-        if self.real:
-            frag_prefix = os.path.join(self.raft_reads_path, f"{self.genome_str}")
-        else:
-            frag_prefix = os.path.join(self.raft_reads_path, f"{self.genome_str}_frag")
-        ov_file = merged_paf + '.gz'
-        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 50000 {reads_file} {cis_paf_path}", shell=True, check=True)
-        shutil.move(frag_prefix + ".coverage.txt", frag_prefix + '_cis.coverage.txt')
-        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} {reads_file} {ov_file}", shell=True, check=True)        
+        print(f"Merged overlaps saved to: {merged_paf}.gz")
+        # Move and compress cis_paf
+        with gzip.open(cis_paf_path + '.gz', 'wt') as outfile:
+            with open(cis_paf, 'r') as infile:
+                outfile.write(infile.read())
+        print(f"Cis overlaps saved to: {cis_paf_path}.gz")
 
-        # Gzip the fragmented reads file
-        subprocess.run(f"gzip -f {frag_prefix}.reads.fasta", shell=True, check=True)
-        #-m 2.3 
-
-    def raft_process_fasta_files(self):
-
-        sequence_file = os.path.join(self.raft_reads_path, f"{self.genome_str}_frag.reads.fasta.gz")            
-        description_file = os.path.join(self.read_descr_path, f'{self.genome_str}.fasta')
-        output_file = os.path.join(self.raft_reads_path, f'{self.genome_str}.reads.fasta.gz')
-
-        sequences = self.load_fasta(sequence_file)
-        descriptions = self.load_fasta(description_file)
-        
-        description_dict = {}
-        for d in descriptions:
-            parsed = self.parse_description_header(d.description)
-            if parsed:
-                description_dict[parsed["id"]] = parsed
-            else:
-                print(f"Skipping description: {d.id} {d.description}", file=sys.stderr)
-        
-        with gzip.open(output_file, 'wt') as out_f:
-            for i, seq in enumerate(sequences, start=1):
-                read_id, pos_start, pos_end = self.parse_sequence_header(seq.description)
-                #print(read_id, pos_start, pos_end, read_id in description_dict)
-                #print(i)
-                if read_id and read_id in description_dict:
-                    desc = description_dict[read_id]
-                    relative_start = desc["start"] + pos_start
-                    relative_end = desc["start"] + pos_end
-                    new_header = f">{i} strand={desc['strand']} start={relative_start} end={relative_end} variant={desc['variant']} chr={desc['chr']}"
-                    out_f.write(f"{new_header}\n{seq.seq}\n")
-                else:
-                    print(f"No matching description found for sequence: {seq.id} {seq.description}", file=sys.stderr)
-                    exit()
-        #shutil.move(os.path.join(self.raft_reads_path, f'{self.genome_str}.coverage.txt'), os.path.join(self.pile_o_grams_path, f'{self.genome_str}.txt'))
-
-
-    def create_graphs(self):
-        if self.raft:
-            full_fasta = os.path.join(self.raft_reads_path, f'{self.genome_str}.reads.fasta.gz')
-        elif self.real:
-            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
-        else:
-            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
-
-        gfa_output = os.path.join(self.gfa_graphs_path, f'{self.genome_str}.gfa')
-        
-
-        if self.diploid:
-            hifiasm_asm_output_1 = os.path.join(self.hifiasm_asm_path, f'{self.genome_str}.hap1.gfa')
-            hifiasm_asm_output_2 = os.path.join(self.hifiasm_asm_path, f'{self.genome_str}.hap2.gfa')
-            #subprocess.run(f'./hifiasm --prt-raw --write-paf -r1 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} -1 {self.paternal_yak} -2 {self.maternal_yak} {full_fasta}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'./hifiasm --prt-raw --write-paf -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {full_fasta}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.hap1.p_ctg.gfa {hifiasm_asm_output_1}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.hap2.p_ctg.gfa {hifiasm_asm_output_2}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.raw.r_utg.gfa {gfa_output}', shell=True, cwd=self.hifiasm_path)
-        else:
-            hifiasm_asm_output = os.path.join(self.hifiasm_asm_path, f'{self.genome_str}.gfa')
-            subprocess.run(f'./hifiasm --prt-raw --write-paf -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {full_fasta}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.p_ctg.noseq.gfa {hifiasm_asm_output}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.p_ctg.gfa {hifiasm_asm_output}', shell=True, cwd=self.hifiasm_path)
-            subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.raw.r_utg.gfa {gfa_output}', shell=True, cwd=self.hifiasm_path)
-            # Move the PAF file to the hifiasm PAF directory
-        # Move the PAF file to the hifiasm PAF directory
-        paf_output = os.path.join(self.paf_path, f'{self.genome_str}.paf')
-        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.ovlp.paf {paf_output}', shell=True, cwd=self.hifiasm_path)
-        self.save_hifiasm_assemblies()
 
         subprocess.run(f'rm {self.hifiasm_dump}/tmp_asm*', shell=True, cwd=self.hifiasm_path)
 
-    def save_hifiasm_assemblies(self):
-        #trio_mode = self.diploid
-        hic_mode = False
-        if  self.diploid:
-            self._convert_and_move_assembly('tmp_asm.dip.hap1.p_ctg.gfa')
-            self._convert_and_move_assembly('tmp_asm.dip.hap2.p_ctg.gfa')
-        elif hic_mode:
-            self._convert_and_move_assembly('tmp_asm.hic.hap1.p_ctg.gfa')
-            self._convert_and_move_assembly('tmp_asm.hic.hap2.p_ctg.gfa')
-        else:
-            self._convert_and_move_assembly('tmp_asm.bp.p_ctg.gfa')
-
-    def _convert_and_move_assembly(self, gfa_filename):
-        gfa_path = os.path.join(self.hifiasm_dump, gfa_filename)
-        fa_filename = gfa_filename.replace('.gfa', '.fa')
-        fa_path = os.path.join(self.hifiasm_asm_path, fa_filename)
-        
-        if os.path.exists(gfa_path):
-            # Convert GFA to FASTA
-            awk_command = "awk '/^S/{print \">\"$2;print $3}'"
-            subprocess.run(f"{awk_command} {gfa_path} > {fa_path}", shell=True, check=True)
-            print(f"Converted and moved {gfa_filename} to {fa_filename}")
-        else:
-            print(f"Warning: Expected assembly file {gfa_filename} not found.")
-
-    def add_hifiasm_final_edges(self, gfa_path):
-        print(f"Loading HiFiasms final gfa...")
-        with open(gfa_path) as f:
-            rows = f.readlines()
-            c2r = defaultdict(list)
-            for row in rows:
-                row = row.strip().split()
-                if row[0] != "A": continue
-                c2r[row[1]].append(row)
-
-        print(f"Generating contigs...")
-        edges = []
-        prefixes = []
-        orientations = []
-        for c_id, reads in c2r.items():
-            reads = sorted(reads, key=lambda x:int(x[2]))
-            for i in range(len(reads)-1):
-                curr_row, next_row = reads[i], reads[i+1]
-                curr_prefix = int(next_row[2])-int(curr_row[2])
-                edges.append((str(curr_row[4]), str(next_row[4])))
-                orientations.append((0 if curr_row[3] == '+' else 1, 0 if next_row[3] == '+' else 1))
-                #print(curr_row[4])
-                prefixes.append(curr_prefix)
-        return edges, prefixes, orientations
-
-
     def parse_gfa(self):
         nx_graph, read_seqs, node_to_read, read_to_node, successor_dict = self.only_from_gfa()
-        self.create_reads_fasta(read_seqs, self.chr_id)  # Add self.chr_id as an argument
         # Save data
         self.pickle_save(node_to_read, self.node_to_read_path)
-        self.pickle_save(successor_dict, self.successor_dict_path)
-        if self.prep_decoding:
-            self.pickle_save(read_seqs, self.reduced_reads_path)
         self.pickle_save(read_to_node, self.read_to_node_path)
         
-        """with open(os.path.join(self.node_to_read_path, f'{self.genome_str}.pkl'), 'rb') as f:
+        """
+        self.create_reads_fasta(read_seqs, self.chr_id)  # Add self.chr_id as an argument
+
+        with open(os.path.join(self.node_to_read_path, f'{self.genome_str}.pkl'), 'rb') as f:
             node_to_read = pickle.load(f)
         with open(os.path.join(self.successor_dict_path, f'{self.genome_str}.pkl'), 'rb') as f:
             successor_dict = pickle.load(f)
         with open(os.path.join(self.reduced_reads_path, f'{self.genome_str}.pkl'), 'rb') as f:
             read_seqs = pickle.load(f)
         with open(os.path.join(self.read_to_node_path, f'{self.genome_str}.pkl'), 'rb') as f:
-            read_to_node = pickle.load(f)"""
-
-        # Load pickled FASTA file from full_reads
-        if self.prep_decoding:
-            fasta_pickle_path = os.path.join(self.full_reads_path, f'{self.genome_str}.pkl')
-            with open(fasta_pickle_path, 'rb') as f:
-                annotated_fasta_data = pickle.load(f)
-                    # Initialize reads_parsed set
-            paf_path = os.path.join(self.paf_path, f'{self.genome_str}.paf')
-            paf_out = os.path.join(self.paf_path, f"{self.genome_str}.pkl")
-            aux = {
-                'read_seqs': read_seqs,
-                'read_to_node': read_to_node,
-                'annotated_fasta_data': annotated_fasta_data,
-                'successor_dict': successor_dict,
-                'node_to_read': node_to_read
-                }
-            self.parse_paf(aux, paf_path, paf_out)
+            read_to_node = pickle.load(f)
+        """
 
         return nx_graph  
 
     def only_from_gfa(self):
         self.assembler = "hifiasm"
         training = not self.real
-        gfa_path = os.path.join(self.gfa_graphs_path, f'{self.genome_str}.gfa')
-        if self.raft:
-            reads_path = os.path.join(self.raft_reads_path, f'{self.genome_str}.reads.fasta.gz')
+        gfa_path = os.path.join(self.gfa_unitig_path, f'{self.genome_str}.gfa')
+        if self.real:
+            reads_path = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
         else:
-            #reads_path = os.path.join(self.full_reads_ec_path, f'{self.genome_str}_ec.fa')
-            if self.real:
-                reads_path = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
-            else:
-                reads_path = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
-
+            reads_path = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
         read_headers = self.get_read_headers(reads_path)
 
         graph_nx = nx.DiGraph()
         read_to_node, node_to_read, old_read_to_utg = {}, {}, {}  ##########
         read_to_node2 = {}
-        edges_dict = {}
+        #edges_dict = {}
         read_lengths, read_seqs = {}, {}  # Obtained from the GFA
         read_idxs, read_strands, read_starts, read_ends, read_chrs, read_variants, variant_class = {}, {}, {}, {}, {}, {}, {}  # Obtained from the FASTA/Q headers
         edge_ids, prefix_lengths, overlap_lengths, overlap_similarities = {}, {}, {}, {}
@@ -781,216 +581,23 @@ class HicDatasetCreator:
 
                     prefix_lengths[(src_real, dst_real)] = read_lengths[src_real] - ol_length
                     prefix_lengths[(src_virt, dst_virt)] = read_lengths[src_virt] - ol_length
-
-        ### The following code is for adding the final assembly edges to the graph.
-        ## In HiFiasm the final assembly has some edges that are NOT in the full graph, 
-        # so we need to add them to make the graph complete.
-
-        
-        if self.diploid:
-            hifiasm_asm_output_1 = os.path.join(self.hifiasm_asm_path, f'{self.genome_str}.hap1.gfa')
-            hifiasm_asm_output_2 = os.path.join(self.hifiasm_asm_path, f'{self.genome_str}.hap2.gfa')
-            final_assembly_edges_1, prefixes_1, orientations_1 = self.add_hifiasm_final_edges(hifiasm_asm_output_1)
-            final_assembly_edges_2, prefixes_2, orientations_2 = self.add_hifiasm_final_edges(hifiasm_asm_output_2)
-            #exit()
-            final_assembly_edges = final_assembly_edges_1 + final_assembly_edges_2
-            prefixes = prefixes_1 + prefixes_2
-            orientations = orientations_1 + orientations_2
-        else:
-            hifiasm_asm_output = os.path.join(self.hifiasm_asm_path, f'{self.genome_str}.gfa')
-            final_assembly_edges, prefixes, orientations = self.add_hifiasm_final_edges(hifiasm_asm_output)
-
-        nx_edges = set(graph_nx.edges())
-        nx_nodes = set(graph_nx.nodes())
-        just_added_edges = set()
-        new_nodes_to_read = {}
-        new_edge = {edge: 0 for edge in graph_nx.edges()}
-        new_node = {node: 0 for node in graph_nx.nodes()}
-        fastaq_seqs = self.load_fasta(reads_path, dict=True)
-        # Initialize counters
-        print(f"Processing {len(final_assembly_edges)} edges")
-        total_edges = len(final_assembly_edges)
-        skipped_missing_read_ids = 0
-        skipped_missing_nodes = 0 
-        skipped_self_loops = 0
-        added_forward_edges = 0
-        existing_forward_edges = 0
-        double_new_edges = 0
-        for i, edge in enumerate(final_assembly_edges):
-            # Convert read IDs to node IDs using read_to_node
-            ori = orientations[i]
-
-            if edge[0] not in read_to_node2:
-                # Add node and sequence for the first read
-                #continue
-                if ori[0] == '+':
-                    real_idx, virt_idx = node_idx, node_idx + 1 
-                else:
-                    real_idx, virt_idx = node_idx + 1, node_idx
-                read_to_node2[edge[0]] = (real_idx, virt_idx)
-                for idx in (real_idx, virt_idx):
-                    nx_nodes.add(idx)
-                    graph_nx.add_node(idx)
-                    node_to_read[idx] = edge[0]
-                    new_nodes_to_read[idx] = edge[0]
-                    new_node[idx] = 1
-                    read_lengths[idx] = len(fastaq_seqs[edge[0]])
-                node_idx += 2
-                if not self.real:
-                    #### you have given here the read_ids (small read_ids) 
-                    description = read_headers[edge[0]]
-                    # desc_id, strand, start, end = description.split()
-                    strand = re.findall(r'strand=(\+|\-)', description)[0]
-                    strand = 1 if strand == '+' else -1
-                    #print(f"strand: {strand}", orientations[i])
-                    start = int(re.findall(r'start=(\d+)', description)[0])  # untrimmed
-                    end = int(re.findall(r'end=(\d+)', description)[0])  # untrimmed
-                    #chromosome = int(re.findall(r'chr=(\d+)', description)[0])
-                    chromosome = re.findall(r'chr=([^\s]+)', description)[0]
-                    # this should be the ones in the description header info!! So I am very close
-                    # just use the descr header info and fill the dicts here???
-                    if self.diploid:
-                        variant = re.findall(r'variant=([P|M])', description)[0]
-                        read_variants[real_idx] = read_variants[virt_idx] = variant
-                    read_strands[real_idx], read_strands[virt_idx] = strand, -strand
-                    read_starts[real_idx] = read_starts[virt_idx] = start
-                    read_ends[real_idx] = read_ends[virt_idx] = end
-                    read_chrs[real_idx] = read_chrs[virt_idx] = chromosome
-                    #read_lengths[real_idx] = read_lengths[virt_idx] = abs(end-start)
-                    #skipped_missing_read_ids += 1
-                    #continue
-
-            if edge[1] not in read_to_node2:
-                # Add node and sequence for the second read
-                #continue
-                if ori[1] == '+':
-                    real_idx, virt_idx = node_idx, node_idx + 1 
-                else:
-                    real_idx, virt_idx = node_idx + 1, node_idx
-
-                read_to_node2[edge[1]] = (real_idx, virt_idx)
-                for idx in (real_idx, virt_idx):
-                    nx_nodes.add(idx)
-                    graph_nx.add_node(idx)
-                    node_to_read[idx] = edge[1]
-                    new_nodes_to_read[idx] = edge[1]
-                    new_node[idx] = 1
-                    read_lengths[idx] = len(fastaq_seqs[edge[1]])
-                node_idx += 2
-                if not self.real:
-                    #### you have given here the read_ids (small read_ids) 
-                    description = read_headers[edge[1]]
-                    # desc_id, strand, start, end = description.split()
-                    strand = re.findall(r'strand=(\+|\-)', description)[0]
-                    strand = 1 if strand == '+' else -1
-                    start = int(re.findall(r'start=(\d+)', description)[0])  # untrimmed
-                    end = int(re.findall(r'end=(\d+)', description)[0])  # untrimmed
-                    #chromosome = int(re.findall(r'chr=(\d+)', description)[0])
-                    chromosome = re.findall(r'chr=([^\s]+)', description)[0]
-                    # this should be the ones in the description header info!! So I am very close
-                    # just use the descr header info and fill the dicts here???
-                    if self.diploid:
-                        variant = re.findall(r'variant=([P|M])', description)[0]
-                        read_variants[real_idx] = read_variants[virt_idx] = variant
-                    read_strands[real_idx], read_strands[virt_idx] = strand, -strand
-                    read_starts[real_idx] = read_starts[virt_idx] = start
-                    read_ends[real_idx] = read_ends[virt_idx] = end
-                    read_chrs[real_idx] = read_chrs[virt_idx] = chromosome
-                    #read_lengths[real_idx] = read_lengths[virt_idx] = abs(end-start)
-                #skipped_missing_read_ids += 1
-                #continue
-                
-            # Get forward node IDs
-            src_node = read_to_node2[edge[0]][ori[0]]  # Forward or Backward node ID
-            dst_node = read_to_node2[edge[1]][ori[1]]  # Forward or Backward node ID
-                
-            if src_node == dst_node:
-                skipped_self_loops += 1
-                continue
-
-            if (src_node, dst_node) in just_added_edges:
-                double_new_edges += 1
-                continue
-                
-            # Add forward edge (e1,e2)
-            if (src_node, dst_node) not in nx_edges:
-                #print(f"Adding forward edge ({src_node}, {dst_node})")
-                graph_nx.add_edge(src_node, dst_node)
-                new_edge[(src_node, dst_node)] = 1
-                just_added_edges.add((src_node, dst_node))
-                prefix_lengths[(src_node, dst_node)] = prefixes[i]
-                ol_length = read_lengths[src_node] - prefixes[i]
-
-                overlap_lengths[(src_node, dst_node)] = ol_length
-                added_forward_edges += 1
-                edge_ids[(src_node, dst_node)] = edge_idx
-                edge_idx += 1
-            
-            # Add reverse complement edge (e2^1, e1^1)
-            rc_src = dst_node ^ 1  # e2^1
-            rc_dst = src_node ^ 1  # e1^1
-            
-            if (rc_src, rc_dst) not in nx_edges:
-                #print(f"Adding RC edge ({rc_src}, {rc_dst})")
-                graph_nx.add_edge(rc_src, rc_dst)
-                new_edge[(rc_src, rc_dst)] = 1
-                just_added_edges.add((rc_src, rc_dst))
-                prefix_lengths[(rc_src, rc_dst)] = prefixes[i]
-                ol_length = read_lengths[rc_src] - prefixes[i]
-                overlap_lengths[(rc_src, rc_dst)] = ol_length
-                edge_ids[(rc_src, rc_dst)] = edge_idx
-                edge_idx += 1
-
-        print(f"\nEdge Processing Summary:")
-        print(f"Total edges checked: {total_edges}")
-        print(f"Skipped edges:")
-        print(f"  - Missing read IDs: {skipped_missing_read_ids}")
-        print(f"  - Self loops: {skipped_self_loops}")
-        print(f"Forward edges:")
-        print(f"  - Added: {added_forward_edges}")
-        print(f"  - Already existed: {existing_forward_edges}")
-        print(f"  - Double new edges: {double_new_edges}")
-        elapsed = (datetime.now() - time_start).seconds
-        print(f'Elapsed time: {elapsed}s')
-        
-        if no_seqs_flag:
-            fastaq_seqs = self.load_fasta(reads_path, dict=True)
-
-            print(f'Sequences successfully loaded!')
-            # fastaq_seqs = {read.id: read.seq for read in SeqIO.parse(reads_path, filetype)}
-            for node_id in tqdm(node_to_read.keys(), ncols=120):
-                    read_id = node_to_read[node_id]
-                    seq = fastaq_seqs[read_id]
-                    read_seqs[node_id] = str(seq if node_id % 2 == 0 else seq.reverse_complement())
-                    
-            print(f'Loaded DNA sequences!')
-        else:
-            fastaq_seqs = self.load_fasta(reads_path, dict=True)
-            print(f'Sequences successfully loaded!')
-            #print(new_nodes_to_read.keys())
-            for node_id in tqdm(new_nodes_to_read.keys(), ncols=120):
-                read_id = new_nodes_to_read[node_id]
-                seq = fastaq_seqs[read_id]
-                read_seqs[node_id] = str(seq if node_id % 2 == 0 else seq.reverse_complement())
-            print(f'Added new DNA sequences!')
         
         elapsed = (datetime.now() - time_start).seconds
         print(f'Elapsed time: {elapsed}s')
 
-        print(f'Calculating similarities...')
+        '''print(f'Calculating similarities...')
         overlap_similarities = self.calculate_similarities(edge_ids, read_seqs, overlap_lengths)
         print(f'Done!')
         elapsed = (datetime.now() - time_start).seconds
-        print(f'Elapsed time: {elapsed}s')
+        print(f'Elapsed time: {elapsed}s')'''
 
         nx.set_node_attributes(graph_nx, read_lengths, 'read_length')
         nx.set_node_attributes(graph_nx, variant_class, 'variant_class')
         node_attrs = ['read_length', 'variant_class']
 
-        nx.set_edge_attributes(graph_nx, prefix_lengths, 'prefix_length')
-        nx.set_edge_attributes(graph_nx, overlap_lengths, 'overlap_length')
-        nx.set_edge_attributes(graph_nx, new_edge, 'new_edge')
-        edge_attrs = ['prefix_length', 'overlap_length', 'new_edge']
+        #nx.set_edge_attributes(graph_nx, prefix_lengths, 'prefix_length')
+        #nx.set_edge_attributes(graph_nx, overlap_lengths, 'overlap_length')
+        #edge_attrs = ['prefix_length', 'overlap_length']
 
         if training:
             nx.set_node_attributes(graph_nx, read_strands, 'read_strand')
@@ -1000,8 +607,8 @@ class HicDatasetCreator:
             nx.set_node_attributes(graph_nx, read_chrs, 'read_chr')
             node_attrs.extend(['read_strand', 'read_start', 'read_end', 'read_variant', 'read_chr'])
 
-        nx.set_edge_attributes(graph_nx, overlap_similarities, 'overlap_similarity')
-        edge_attrs.append('overlap_similarity')
+        #nx.set_edge_attributes(graph_nx, overlap_similarities, 'overlap_similarity')
+        #edge_attrs.append('overlap_similarity')
 
         # Create a dictionary of nodes and their direct successors
         successor_dict = {node: list(graph_nx.successors(node)) for node in graph_nx.nodes()}
@@ -1020,35 +627,24 @@ class HicDatasetCreator:
         from both full and cis coverage files
         """
         # Load the pile o gram files
-        if self.real:
-            full_pog_file = os.path.join(self.raft_reads_path, f'{self.genome_str}.coverage.txt')
-            cis_pog_file = os.path.join(self.raft_reads_path, f'{self.genome_str}_cis.coverage.txt')
-        else:
-            full_pog_file = os.path.join(self.raft_reads_path, f'{self.genome_str}_frag.coverage.txt')
-            cis_pog_file = os.path.join(self.raft_reads_path, f'{self.genome_str}_frag_cis.coverage.txt')
-        
+        pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+
         # Load the read_to_node_id mapping
         read_to_node_path = os.path.join(self.read_to_node_path, f'{self.genome_str}.pkl')
         with open(read_to_node_path, 'rb') as f:
             read_to_node = pickle.load(f)
-        node_to_read_path = os.path.join(self.node_to_read_path, f'{self.genome_str}.pkl')
-        with open(node_to_read_path, 'rb') as f:
-            node_to_read = pickle.load(f)
 
         # Initialize all nodes with default values of 1
         pog_median = {node: 1 for node in nx_graph.nodes()}
         pog_min = {node: 1 for node in nx_graph.nodes()}
         pog_max = {node: 1 for node in nx_graph.nodes()}
-        cis_pog_median = {node: 1 for node in nx_graph.nodes()}
-        cis_pog_min = {node: 1 for node in nx_graph.nodes()}
-        cis_pog_max = {node: 1 for node in nx_graph.nodes()}
 
         # Store coverage data for each read
         read_coverages = {}
         cis_read_coverages = {}
 
         # Process full coverage file
-        with open(full_pog_file, 'r') as f:
+        with open(pog_file, 'r') as f:
             for line in f:
                 if line.startswith('read'):
                     parts = line.strip().split()
@@ -1068,28 +664,7 @@ class HicDatasetCreator:
         nx.set_node_attributes(nx_graph, pog_median, 'pog_median')
         nx.set_node_attributes(nx_graph, pog_min, 'pog_min')
         nx.set_node_attributes(nx_graph, pog_max, 'pog_max')
-        # Process cis coverage file 
-        with open(cis_pog_file, 'r') as f:
-            for line in f:
-                if line.startswith('read'):
-                    parts = line.strip().split()
-                    read_id = parts[1]
-                    coverages = [int(part.split(',')[1]) for part in parts[2:] if ',' in part]
-                    cis_read_coverages[read_id] = coverages
-                    if read_id in read_to_node:
-                        node_ids = read_to_node[read_id]
-                        median = np.median(coverages)
-                        min_val = np.min(coverages)
-                        max_val = np.max(coverages)
-                        for node_id in node_ids:
-                            cis_pog_median[node_id] = median / self.depth
-                            cis_pog_min[node_id] = min_val / self.depth
-                            cis_pog_max[node_id] = max_val / self.depth
-
-        # Set the pog attributes for each node in the graph
-        nx.set_node_attributes(nx_graph, cis_pog_median, 'cis_pog_median')
-        nx.set_node_attributes(nx_graph, cis_pog_min, 'cis_pog_min')
-        nx.set_node_attributes(nx_graph, cis_pog_max, 'cis_pog_max')
+        
         print(f"Added pile-o-gram features to {len(pog_median)} nodes.")
 
     def create_hh_features(self, nx_graph):
@@ -1099,12 +674,10 @@ class HicDatasetCreator:
         now check if the variant_ends entry with the same index is larger then the read start. If yes: there is a variation
         now check the read end position: it's the same but swapping ends and starts.
         """
-        M_path = os.path.join(self.vcf_path, f'{self.chrN}_M.vcf.gz')
-        P_path = os.path.join(self.vcf_path, f'{self.chrN}_P.vcf.gz')
-
         read_start = nx.get_node_attributes(nx_graph, 'read_start')
         read_end = nx.get_node_attributes(nx_graph, 'read_end')
         read_variant = nx.get_node_attributes(nx_graph, 'read_variant')
+        read_chr = nx.get_node_attributes(nx_graph, 'read_chr')  # Get read_chr attribute
 
         if self.centromere_graph:
             for read in read_start.keys():
@@ -1121,22 +694,37 @@ class HicDatasetCreator:
                     print(f"Wrong Read Variant detected {read_variant[read]}")
                     exit()
 
+        # Create dictionaries to store variant data for each chromosome
+        M_variants = {}
+        P_variants = {}
+        processed_chrs = set()
+
         hh_dict = {}
-        print(f'Process Maternal reference variation file')
-        M_variant_starts, M_variant_ends = self.process_vcf_file(M_path)
-        print(f'Process Paternal reference variation file')
-        P_variant_starts, P_variant_ends = self.process_vcf_file(P_path)
-        print(f'Process graph nodes')
         hetero_nodes = 0
 
+        # Process nodes first to identify which chromosomes we need to load
         for node in nx_graph.nodes():
+            chr_id = read_chr[node]
+            if chr_id not in processed_chrs:
+                processed_chrs.add(chr_id)
+                # Load VCF files for this chromosome
+                M_path = os.path.join(self.vcf_path, f'chr{chr_id}_M.vcf.gz')
+                P_path = os.path.join(self.vcf_path, f'chr{chr_id}_P.vcf.gz')
+                
+                print(f'Process Maternal reference variation file for chromosome {chr_id}')
+                M_variants[chr_id] = self.process_vcf_file(M_path)
+                print(f'Process Paternal reference variation file for chromosome {chr_id}')
+                P_variants[chr_id] = self.process_vcf_file(P_path)
+
+        print(f'Process graph nodes')
+        for node in nx_graph.nodes():
+            chr_id = read_chr[node]
             hh_dict[node] = "O"  # Homozygous Region
+            
             if read_variant[node] == 'M':
-                var_starts = M_variant_starts
-                var_ends = M_variant_ends
+                var_starts, var_ends = M_variants[chr_id]
             elif read_variant[node] == 'P':
-                var_starts = P_variant_starts
-                var_ends = P_variant_ends
+                var_starts, var_ends = P_variants[chr_id]
             else:
                 print('wrong read_variant')
                 exit()
@@ -1177,7 +765,41 @@ class HicDatasetCreator:
                     gt_hap[node] = -1
         nx.set_node_attributes(nx_graph, gt_hap, 'gt_hap')
 
+    def process_vcf_file(self, file_path):
+        # Open the file (handle .gz compression if necessary)
+        with gzip.open(file_path, 'rt') as f:
+            # Iterate through the file until the header line starting with '#' is found
+            vcf_df = pd.read_csv(f, sep='\t', comment='#', header=None,
+                                 names=['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT',
+                                        'SAMPLE'])
+        variant_starts = []
+        variant_ends = []
+        for index, row in vcf_df.iterrows():
+            variant_length = len(row['REF'])
+            variant_starts.append(row['POS'])
+            variant_ends.append(row['POS'] + variant_length - 1)  # Adjusted to calculate the end position accurately
+        print(len(variant_starts), len(variant_ends))
+        return variant_starts, variant_ends
+    
+def create_full_dataset_dict(config):
 
+    train_dataset = config['training']
+    val_dataset = config['validation']
+
+    # Initialize the full_dataset dictionary
+    full_dataset = {}
+    # Add all keys and values from train_dataset to full_dataset
+    for key, value in train_dataset.items():
+        full_dataset[key] = value
+    # Add keys from val_dataset to full_dataset, summing values if key already exists
+    if val_dataset is not None:
+        for key, value in val_dataset.items():
+            if key in full_dataset:
+                full_dataset[key] += value
+            else:
+                full_dataset[key] = value
+
+    return full_dataset
 
 def main():
     parser = argparse.ArgumentParser(description="Generate dataset based on configuration")
@@ -1188,27 +810,22 @@ def main():
 
     dataset_path = args.data_path
     ref_base_path = args.ref
+    config_path = args.config
     # Read the configuration file
-    with open(args.config, 'r') as config_file:
+    with open(config_path, 'r') as config_file:
         config = yaml.safe_load(config_file)
 
     full_dataset = create_full_dataset_dict(config)
+
     # Initialize the appropriate dataset creator
-    if config['gen_config']['assembler'] == 'raven':
-        dataset_object = RavenDatasetCreator(args.ref, args.data_path, args.config)
-        stop_after_reads = True
-    elif config['gen_config']['assembler'] == 'hifiasm':
-        dataset_object = HifiasmDatasetCreator(args.ref, args.data_path, args.config)
-        stop_after_reads = False
-    else:
-        raise ValueError(f"Unknown assembler: {config['gen_config']['assembler']}")
+    dataset_object = HicDatasetCreator(ref_base_path, dataset_path, config_path)
 
     # Process each chromosome
     for chrN, amount in full_dataset.items():
         for i in range(amount):
-            gen_steps(dataset_object, chrN, i, config['gen_steps'], ref_base_path, stop_after_reads)
+            gen_steps(dataset_object, chrN, i, config['gen_steps'], ref_base_path)
 
-def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path, stop_after_reads=False):
+def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
 
     split_chrN = chrN_.split(".")
     chrN = split_chrN[1]
@@ -1216,17 +833,15 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path, stop_aft
     chr_id = f'{chrN}_{i}'
     ref_base = (f'{ref_base_path}/{genome}')
         
-    #if i<110:
+    #if i<10:
     #   return
 
     dataset_object.load_chromosome(genome, chr_id, ref_base)
     print(f'Processing {dataset_object.genome_str}...')
 
     if gen_step_config['sample_reads']:
-        dataset_object.simulate_reads()
-        if stop_after_reads:
-            return
-
+        dataset_object.simulate_pbsim_reads()
+        print(f"Done with reads simulation {chrN}_{i}")
     if gen_step_config['create_graphs']:
         dataset_object.create_graphs()
         print(f"Created gfa graph {chrN}_{i}")
@@ -1240,39 +855,20 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path, stop_aft
         nx_graph = dataset_object.load_nx_graph()
         print(f"Loaded nx graph {chrN}_{i}")
 
-    if dataset_object.diploid and gen_step_config['create_yak']:# and dataset_object.real:
-        dataset_object.gen_yak_files()
-        print(f"Done with yak files {chrN}_{i}")
-
     if 'pile-o-gram' in gen_step_config:
         if gen_step_config['pile-o-gram']:
-            #dataset_object.add_pos_features(nx_graph)
-            #print(f"Done with pile o gram {chrN}_{i}")
-            #dataset_object.create_pog_features(nx_graph)
+            print(f"Creating pog files with raft {chrN}_{i}")
+            dataset_object.run_raft()
+            dataset_object.create_pog_features(nx_graph)
             print(f"Done with pog features {chrN}_{i}")
-            #dataset_object.analyze_debug(nx_graph)
-            #dataset_object.create_random_walk_features(nx_graph)
-            #dataset_object.add_min_cycle_edges_length(nx_graph)
-            if 'comp_dist' not in nx_graph.nodes[list(nx_graph.nodes())[0]]:
-                dataset_object.add_comp_dist(nx_graph)
-            #dataset_object.add_comp_dist_multi_process(nx_graph)
-            #exit()
             dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
 
     if dataset_object.diploid and gen_step_config['diploid_features']:
-        #if not dataset_object.real:
-        #    dataset_object.create_hh_features(nx_graph)
-        #    print(f"Done with hh features {chrN}_{i}")
-        dataset_object.add_trio_binning_labels(nx_graph)
-        print(f"Done with trio binning {chrN}_{i}")
         dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
 
     if not dataset_object.real and gen_step_config['ground_truth']:
-        #dataset_object.get_telomere_ftrs(nx_graph)
-        dataset_object.create_gt(nx_graph)
-        print(f"Done with ground truth creation {chrN}_{i}")
-        #dataset_object.add_decision_attr(nx_graph)
-        #print(f"Done with decision node creation {chrN}_{i}")
+        dataset_object.create_hh_features(nx_graph)
+        print(f"Done with hh features {chrN}_{i}")
         dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
 
     if gen_step_config['ml_graphs']:
