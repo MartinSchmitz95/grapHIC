@@ -7,6 +7,13 @@ paths:
   hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_4
   raft_path: /home/schmitzmf/RAFT
   centromere_coords: /home/schmitzmf/diploid_gnnome/data/centromere_coordinates_same_len.yml
+  samplesheet_path: ./pipeline_files/samplesheet.csv
+  nextflow_params: ./pipeline_files/params.yml
+  nextflow_config: ./pipeline_files/nextflow.config
+  nextflow_call: "$(which nextflow)"
+  # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
+  # with nf-core tools installed
+  hic_pipeline_path: ~/nf-core-hic_2.1.0/2_1_0/main.nf
 gen_config:
   depth: 20
   threads: 16
