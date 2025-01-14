@@ -1,0 +1,21 @@
+input: './samplesheet_both.csv'
+outdir: './unitigs-e2e-multi-out/'
+fasta: '../multi_chrom_dataset/fasta_unitig/i002c_v04_multi_10_0.fasta'
+
+# using dnase mode
+dnase: True
+min_cis_dist: 1000
+
+# relax alignment quality
+bwt2_opts_end2end: '--very-sensitive -L 22 -N 1 --score-min L,-0.6,-0.6 --end-to-end --reorder --all'
+min_mapq: 0 # mapq not meaningful with --all
+
+# allow multi-mapping reads
+keep_multi: True
+
+skip_compartments: True
+skip_dist_decay: True
+skip_tads: True
+skip_mcool: True
+skip_balancing: False
+skip_multiqc: False

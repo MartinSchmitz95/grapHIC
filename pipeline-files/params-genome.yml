@@ -1,0 +1,12 @@
+input: './samplesheet.csv'
+outdir: './out/'
+#fasta: './I002C_hifiasm_mergedhaps.fa'
+fasta: '../multi_chrom_dataset/fasta_unitig/i002c_v04_multi_10_0.fasta'
+
+dnase: True
+min_cis_dist: 0
+
+skip_compartments: True
+skip_tads: True
+skip_multiqc: True
+
