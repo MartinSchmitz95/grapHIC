@@ -33,7 +33,7 @@ def aggr_chrs(in_path: str) -> Cooler:
     """
     # cooler requires a URI on the filesystem, so use a tmpfile
     tmp = tempfile.NamedTemporaryFile().name
-    
+
     #TODO calculate exact factor?
     cooler.coarsen_cooler(in_path, tmp, sys.maxsize, 900) # factor should be infinity
 
@@ -56,7 +56,7 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
 
     if len(array) != len(chrnames):
         raise ValueError("Labels not same length as array! Might not have been aggregated by Chr.")
-    
+
     # using the weights seems to induce NaN values in the sex chrs, as they have 0 counts
     # set these to 0 manually
     np.nan_to_num(array, copy=False)
@@ -73,7 +73,7 @@ def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGrap
     assert len(in_cooler.chromnames) == len(nodes_dict.keys())
     # get range of node ids
     max_node_id = max(max(x[0], x[1]) for x in nodes_dict.values())
-    assert max_node_id == 2*len(nodes_dict)
+    assert max_node_id == 2*len(nodes_dict) - 1 # indices start with 0
     # check it starts with 0
     assert min(min(x[0], x[1]) for x in nodes_dict.values()) == 0
 
@@ -98,12 +98,13 @@ def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGrap
     # iterate through every two distinct nodes once
     ret.add_weighted_edges_from(
             # value needs to be coerced to single float
-            itertools.flatten(full_pairwise(i_lab, j_lab, float(mat[i, j][:])))
-                for j, j_lab in enumerate(in_cooler.chromnames)
-                    if i > j # will not generate self-edges
-                    #if i != j # will not generate self-edges
-            for i, i_lab in enumerate(in_cooler.chromnames)
-            )
+            itertools.chain.from_iterable( # apparently the standard way to flatMap in python
+                                          full_pairwise(i_lab, j_lab, float(mat[i, j][:]))
+                                          for j, j_lab in enumerate(in_cooler.chromnames)
+                                          for i, i_lab in enumerate(in_cooler.chromnames)
+                                          if j > i # will not generate self-edges
+                                          #if i != j # will not generate self-edges
+                                          ))
     return ret
 
 def load_pickled_dict(filepath) -> Dict:
