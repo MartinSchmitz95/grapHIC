@@ -4,10 +4,13 @@ import sys
 import tempfile
 import math
 
+from typing import Tuple, Dict
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-from typing import Tuple
+import networkx as nx
+import pickle
 
 import cooler
 from cooler import Cooler
@@ -59,6 +62,32 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
     np.nan_to_num(array, copy=False)
 
     return (chrnames, array)
+
+def to_graph(in_cooler: Cooler, nodes_dict: Dict) -> nx.MultiGraph:
+    """
+    Takes a coarsened cooler and a dict mapping contig names to pairs of nodes and constructs a graph from it.
+    :returns: a networkx MultiGraph with two nodes corresponding to one contig/its complement.
+    The edges in the graph represent hic contacts between the two contigs.
+    """
+    # check cooler and nodes_dict match
+    assert len(in_cooler.chromnames) == len(nodes_dict.keys())
+    # get range of node ids
+    max_node_id = max(max(x[0], x[1]) for x in nodes_dict.values())
+    assert max_node_id == 2*len(nodes_dict)
+    # check it starts with 0
+    assert min(min(x[0], x[1]) for x in nodes_dict.values()) == 0
+
+    # thoughts: could also use cooler.rename()
+    # but can't handle multiple substitution, and will write to disc unnecessarily
+    # so do iteration ourselves
+    # maybe try again if too slow
+    # maybe do twice & merge the multigraphs to handle complement IDs
+
+    # init the graph with all nodes
+    ret = nx.MultiGraph()
+    ret.add_nodes_from(range(max_node_id))
+
+    # iterate through upper triangle of matrix, 
 
 #TODO read in contig to node mapping dict
 
