@@ -3,12 +3,12 @@
 import sys
 import tempfile
 import math
+import itertools
 
 from typing import Tuple, Dict
 
 import numpy as np
 import matplotlib.pyplot as plt
-
 import networkx as nx
 import pickle
 
@@ -63,7 +63,7 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
 
     return (chrnames, array)
 
-def to_graph(in_cooler: Cooler, nodes_dict: Dict) -> nx.MultiGraph:
+def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGraph:
     """
     Takes a coarsened cooler and a dict mapping contig names to pairs of nodes and constructs a graph from it.
     :returns: a networkx MultiGraph with two nodes corresponding to one contig/its complement.
@@ -87,12 +87,27 @@ def to_graph(in_cooler: Cooler, nodes_dict: Dict) -> nx.MultiGraph:
     ret = nx.MultiGraph()
     ret.add_nodes_from(range(max_node_id))
 
-    # iterate through upper triangle of matrix, 
+    mat = in_cooler.matrix(balance=balance)
+    # helper lambda to generate full pairwise edges between uncomplemented and complemented node ids
+    full_pairwise = lambda i_lab, j_lab, val: [
+            (nodes_dict[i_lab][0], nodes_dict[j_lab][0], val),
+            (nodes_dict[i_lab][0], nodes_dict[j_lab][1], val),
+            (nodes_dict[i_lab][1], nodes_dict[j_lab][0], val),
+            (nodes_dict[i_lab][1], nodes_dict[j_lab][1], val),
+            ]
+    # iterate through every two distinct nodes once
+    ret.add_weighted_edges_from(
+            # value needs to be coerced to single float
+            itertools.flatten(full_pairwise(i_lab, j_lab, float(mat[i, j][:])))
+                for j, j_lab in enumerate(in_cooler.chromnames)
+                    if i > j # will not generate self-edges
+                    #if i != j # will not generate self-edges
+            for i, i_lab in enumerate(in_cooler.chromnames)
+            )
+    return ret
 
 #TODO read in contig to node mapping dict
 
-#TODO save as networkx
-# make two nodes per contig, figure out how to best connect them
 def save_np_matrix(intuple, path, sep='\t'):
     np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
 
