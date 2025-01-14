@@ -30,7 +30,8 @@ def aggr_chrs(in_path: str) -> Cooler:
     """
     # cooler requires a URI on the filesystem, so use a tmpfile
     tmp = tempfile.NamedTemporaryFile().name
-
+    
+    #TODO calculate exact factor?
     cooler.coarsen_cooler(in_path, tmp, sys.maxsize, 900) # factor should be infinity
 
     return Cooler(tmp)
@@ -59,6 +60,10 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
 
     return (chrnames, array)
 
+#TODO read in contig to node mapping dict
+
+#TODO save as networkx
+# make two nodes per contig, figure out how to best connect them
 def save_np_matrix(intuple, path, sep='\t'):
     np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
 
