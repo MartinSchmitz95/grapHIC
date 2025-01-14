@@ -106,7 +106,15 @@ def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGrap
             )
     return ret
 
-#TODO read in contig to node mapping dict
+def load_pickled_dict(filepath) -> Dict:
+    ret = None
+    with open(filepath, 'rb') as f:
+        ret = pickle.load(f)
+    return ret
+
+def save_pickle(obj, filepath):
+    with open(filepath, 'wb') as f:
+        ret = pickle.dump(obj, f)
 
 def save_np_matrix(intuple, path, sep='\t'):
     np.savetxt(path, intuple[1], fmt='%d', delimiter=sep, header=sep.join(intuple[0]))
@@ -125,17 +133,22 @@ def main(args):
     #TODO do proper argparsing later
     infile = args[1]
     outfile = args[2]
+    chromdict = load_pickled_dict(args[3])
 
-    np_tup = to_np_matrix(
-            aggr_chrs(infile)
-            )
+    c = aggr_chrs(infile)
+
+    np_tup = to_np_matrix(c)
 
     #print(np_tup)
 
-    save_np_matrix(np_tup, outfile)
+    save_np_matrix(np_tup, outfile + '.tsv')
+
+    graph = to_graph(c, chromdict)
+    print(graph)
+
+    save_pickle(c, outfile + '.nx.pickle')
 
     export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
-
 
 
 if __name__ == '__main__':
