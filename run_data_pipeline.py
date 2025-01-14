@@ -10,7 +10,7 @@ def main():
     parser.add_argument('--data_path', type=str, default='/mnt/sod2-project/csb4/wgs/martin/diploid_datasets/hifiasm_dataset', help='Path to dataset folder')   
     parser.add_argument('--config', type=str, required=True, help='Path to configuration file')
     args = parser.parse_args()
-
+    print('Starting data pipeline...')
     dataset_path = args.data_path
     ref_base_path = args.ref
     # Read the configuration file
