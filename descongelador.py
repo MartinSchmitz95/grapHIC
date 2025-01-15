@@ -107,7 +107,7 @@ def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGrap
                                           ))
     return ret
 
-def load_pickled_dict(filepath) -> Dict:
+def load_pickle(filepath) -> Dict:
     ret = None
     with open(filepath, 'rb') as f:
         ret = pickle.load(f)
@@ -128,13 +128,21 @@ def export_image(intuple, path, scale=id):
     """
     plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
-
+def export_connection_graph(infile, outfile, chromdict):
+    print("aggregating cooler")
+    c = aggr_chrs(infile)
+    print("loading contig dict")
+    chromdict = load_pickle(chromdict)
+    print("constructing graph")
+    graph = to_graph(c, chromdict)
+    print("saving graph")
+    save_pickle(graph, outfile)
 
 def main(args):
     #TODO do proper argparsing later
     infile = args[1]
     outfile = args[2]
-    chromdict = load_pickled_dict(args[3])
+    chromdict = load_pickle(args[3])
 
     c = aggr_chrs(infile)
 
