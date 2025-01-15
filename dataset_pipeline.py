@@ -41,9 +41,6 @@ class HicDatasetCreator:
         self.pbsim_path = self.paths['pbsim_path']
         self.nextflow_call = self.paths['nextflow_path']
         self.hic_pipeline_path = self.paths['hic_pipeline_path']
-        self.nextflow_params = self.paths['nextflow_params']
-        self.nextflow_config = self.paths['nextflow_config']
-        self.nextflow_config = self.paths['nextflow_config']
         self.sample_profile = self.paths['sample_profile']
         self.depth = gen_config['depth']
         self.diploid = gen_config['diploid']
@@ -368,15 +365,39 @@ class HicDatasetCreator:
         TODO specify config for pipeline from here or as separate config ymls?
         """
 
+        nf_conf = self._write_nf_config()
+        nf_params = self._write_nf_params()
+        samplesheet = self._write_samplesheet()
+
         call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path,
-                        "-c", self.nextflow_config,
-                        "-params-file", self.nextflow_params,
+                        "-c", nf_conf,
+                        "-params-file", nf_params, "-i", samplesheet,
                          "-o", self.hic_path, "-work", self.tmp_path, "-profile docker"])
 
         # cwd should stay in git to make relative paths to config files work
         # alternatively use absolute paths starting from this.__file__
         subprocess.run(call, shell=True)#, cwd=self.dataset_path)
 
+    def _write_nf_config(self) -> os.PathLike:
+        """
+        Writes the nextflow config file for nf-core/hic to a file.
+        Allows all configuration to stay in dataset_config.yml.
+        """
+        pass
+
+    def _write_nf_params(self) -> os.PathLike:
+        """
+        Writes the parameters for nf-core/hic to a yml file.
+        Allows all configuration to stay in dataset_config.yml.
+        """
+        pass
+
+    def _write_samplesheet(self) -> os.PathLike:
+        """
+        Writes the samplesheet for nf-core/hic to a file.
+        Allows all configuration to stay in dataset_config.yml.
+        """
+        pass
 
     def make_hic_edges(self):
         """
