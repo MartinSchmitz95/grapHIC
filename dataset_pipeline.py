@@ -29,6 +29,8 @@ class HicDatasetCreator:
         #self.full_dataset, self.val_dataset, self.train_dataset = utils.create_dataset_dicts(data_config=data_config)
         self.paths = config['paths']
         gen_config = config['gen_config']
+        nfcore_hic_config = config['nfcore_hic']
+        nextflow_config = config['nextflow']
         self.genome_str = ""
         self.genome = "hg002"
         self.sample_name = self.genome # not sure if should always be the same
@@ -62,7 +64,7 @@ class HicDatasetCreator:
 
         # HiC stuff
         self.hic_path = os.path.join(dataset_path, "hic")
-        self.hic_path = os.path.join(dataset_path, "hic")
+        self.hic_readsfiles_pairs = self.paths['hic_readsfiles_pairs']
 
         self.nx_graphs_path = os.path.join(dataset_path, "nx_graphs")
         self.pyg_graphs_path = os.path.join(dataset_path, "pyg_graphs")
@@ -378,26 +380,36 @@ class HicDatasetCreator:
         # alternatively use absolute paths starting from this.__file__
         subprocess.run(call, shell=True)#, cwd=self.dataset_path)
 
-    def _write_nf_config(self) -> os.PathLike:
+    def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
         Writes the nextflow config file for nf-core/hic to a file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        pass
+        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+            pass
+            #TODO figure out how to write nextflow.config format
 
-    def _write_nf_params(self) -> os.PathLike:
+        return filename
+
+    def _write_nf_params(self, filename="params.yml") -> os.PathLike:
         """
         Writes the parameters for nf-core/hic to a yml file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        pass
+        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+            yml.safe_dump(self.nfcore_hic_config
+        return filename
 
-    def _write_samplesheet(self) -> os.PathLike:
+    def _write_samplesheet(self, filename="samplesheet.csv") -> os.PathLike:
         """
         Writes the samplesheet for nf-core/hic to a file.
+        Multiple hic runs may be used per sample. They are written as individual lines to the sample sheet under the same sample name, and will be merged by nf-core/hic.
         Allows all configuration to stay in dataset_config.yml.
         """
-        pass
+        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+            f.write("sample,fastq_1,fastq_2\n")
+            f.writelines(','.join([self.sample_name, f1, f2 for f1, f2 in self.hic_readsfiles_pairs]))
+        return filename
 
     def make_hic_edges(self):
         """
