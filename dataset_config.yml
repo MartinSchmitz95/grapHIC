@@ -1,15 +1,15 @@
 paths:
   sample_profile: hg002hifi
-  pbsim_path: /home/schmitzmf/pbsim3
-  hifiasm_path: /home/schmitzmf/hifiasm_020/
-  raven_path: /home/schmitzmf/heron-raven
-  herro_path: /home/schmitzmf/herro_folder
-  hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_4
-  raft_path: /home/schmitzmf/RAFT
-  centromere_coords: /home/schmitzmf/diploid_gnnome/data/centromere_coordinates_same_len.yml
-  samplesheet_path: ./pipeline_files/samplesheet.csv
-  nextflow_params: ./pipeline_files/params.yml
-  nextflow_config: ./pipeline_files/nextflow.config
+  pbsim_path: ~/pbsim3
+  hifiasm_path: ~/hifiasm_020/
+  raven_path: ~//heron-raven
+  herro_path: ~/herro_folder
+  hifiasm_dump: ~/scratch/dumps/hifiasm_dump_4
+  raft_path: ~/RAFT
+  centromere_coords: ~/diploid_gnnome/data/centromere_coordinates_same_len.yml
+  hic_readsfiles_pairs :
+    - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R1.fastq.gz','/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R2.fastq.gz']
   nextflow_call: "$(which nextflow)"
   # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
   # with nf-core tools installed
@@ -31,8 +31,31 @@ gen_steps:
   ground_truth: False
   ml_graphs: False
 nfcore_hic:
-  test: True
-  foo: bar
+  input: './samplesheet.csv'
+  outdir: './unitigs-out/'
+  fasta: '../multi_chrom_dataset/fasta_unitig/i002c_v04_multi_10_0.fasta'
+
+  # using dnase mode
+  dnase: True
+  min_cis_dist: 1000
+
+  # relax alignment quality
+  # do local alignment instead of e2e, to respect omnic reads
+  # allow up to 4 alignments; should make alignment to unitigs work better
+  bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  min_mapq: 5 # mapq not meaningful with --keep
+
+  #split_fastq: True
+
+  # allow multi-mapping reads
+  keep_multi: True
+
+  skip_compartments: True
+  skip_dist_decay: True
+  skip_tads: True
+  skip_mcool: True
+  skip_balancing: False
+  skip_multiqc: False
 nextflow: |
   workDir = '/raid/scratch/stuleon/unitig-work'
   profile = 'docker'
@@ -40,7 +63,6 @@ nextflow: |
   process {
       resourceLimits = [ cpus: 24, memory: 768.GB, time: 72.h ]
   }
-
 training:
   i002c_v04.multi_10: 100
 validation:
