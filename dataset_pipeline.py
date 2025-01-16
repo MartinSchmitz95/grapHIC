@@ -407,7 +407,7 @@ class HicDatasetCreator:
         """
         with open(os.path.join(self.hic_path, filename), 'wt') as f:
             f.write("sample,fastq_1,fastq_2\n")
-            f.writelines(','.join([self.sample_name, f1, f2 for f1, f2 in self.hic_readsfiles_pairs]))
+            f.writelines(','.join([self.sample_name, f_pair[0], f_pair[1] for f_pair in self.hic_readsfiles_pairs]))
         return filename
 
     def make_hic_edges(self):
