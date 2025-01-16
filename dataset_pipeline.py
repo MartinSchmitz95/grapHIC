@@ -376,9 +376,8 @@ class HicDatasetCreator:
                         "-params-file", nf_params, "-i", samplesheet,
                          "-o", self.hic_path, "-work", self.tmp_path, "-profile docker"])
 
-        # cwd should stay in git to make relative paths to config files work
-        # alternatively use absolute paths starting from this.__file__
-        subprocess.run(call, shell=True)#, cwd=self.dataset_path)
+        # call nextflow, this should finish when the pipeline is done
+        subprocess.run(call, shell=True, cwd=self.dataset_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
@@ -386,8 +385,8 @@ class HicDatasetCreator:
         Allows all configuration to stay in dataset_config.yml.
         """
         with open(os.path.join(self.hic_path, filename), 'wt') as f:
-            pass
-            #TODO figure out how to write nextflow.config format
+            # nf config is stored as a text blurb in the yml, can just write directly
+            f.write(self.nextflow_config)
 
         return filename
 
