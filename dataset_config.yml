@@ -1,19 +1,19 @@
 paths:
   sample_profile: hg002hifi
-  pbsim_path: ~/vendor/pbsim3
-  hifiasm_path: ~/vendor/hifiasm_020/
-  raven_path: ~/vendor/heron-raven
-  herro_path: ~/vendor/herro_folder
-  hifiasm_dump: ~/scratch/dumps/hifiasm_dump_4
-  raft_path: ~/vendor/RAFT
-  centromere_coords: ~/diploid_gnnome/data/centromere_coordinates_same_len.yml
+  pbsim_path: /home/stuleon/vendor/pbsim3
+  hifiasm_path: /home/stuleon/vendor/hifiasm_020/
+  raven_path: /home/stuleon/vendor/heron-raven
+  herro_path: /home/stuleon/vendor/herro_folder
+  hifiasm_dump: /home/stuleon/scratch/dumps/hifiasm_dump_4
+  raft_path: /home/stuleon/vendor/RAFT
+  centromere_coords: /dev/null
   hic_readsfiles_pairs :
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R1.fastq.gz','/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R2.fastq.gz']
-  nextflow_call: "$(which nextflow)"
+  nextflow_path: "$(which nextflow)"
   # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
   # with nf-core tools installed
-  hic_pipeline_path: ~/nf-core-hic_2.1.0/2_1_0/main.nf
+  hic_pipeline_path: /home/stuleon/nf-core-hic_2.1.0/2_1_0/main.nf
 gen_config:
   depth: 20
   threads: 16
