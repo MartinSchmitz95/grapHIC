@@ -1,11 +1,11 @@
 paths:
   sample_profile: hg002hifi
-  pbsim_path: ~/pbsim3
-  hifiasm_path: ~/hifiasm_020/
-  raven_path: ~//heron-raven
-  herro_path: ~/herro_folder
+  pbsim_path: ~/vendor/pbsim3
+  hifiasm_path: ~/vendor/hifiasm_020/
+  raven_path: ~/vendor/heron-raven
+  herro_path: ~/vendor/herro_folder
   hifiasm_dump: ~/scratch/dumps/hifiasm_dump_4
-  raft_path: ~/RAFT
+  raft_path: ~/vendor/RAFT
   centromere_coords: ~/diploid_gnnome/data/centromere_coordinates_same_len.yml
   hic_readsfiles_pairs :
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
