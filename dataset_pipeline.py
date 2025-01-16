@@ -366,6 +366,8 @@ class HicDatasetCreator:
         This finds chromosomal contacts between different unitigs on the same chromosome/haplotype.
         TODO specify config for pipeline from here or as separate config ymls?
         """
+        # set fasta param to what the filename out is
+        self.nfcore_hic_config["fasta"] = self.fasta_unitig_path
 
         nf_conf = self._write_nf_config()
         nf_params = self._write_nf_params()

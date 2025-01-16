@@ -31,10 +31,6 @@ gen_steps:
   ground_truth: False
   ml_graphs: False
 nfcore_hic:
-  input: './samplesheet.csv'
-  outdir: './unitigs-out/'
-  fasta: '../multi_chrom_dataset/fasta_unitig/i002c_v04_multi_10_0.fasta'
-
   # using dnase mode
   dnase: True
   min_cis_dist: 1000
