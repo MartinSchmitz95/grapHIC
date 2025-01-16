@@ -30,6 +30,16 @@ gen_steps:
   diploid_features: False
   ground_truth: False
   ml_graphs: False
+nfcore_hic:
+  test: True
+  foo: bar
+nextflow: |
+  workDir = '/raid/scratch/stuleon/unitig-work'
+  profile = 'docker'
+
+  process {
+      resourceLimits = [ cpus: 24, memory: 768.GB, time: 72.h ]
+  }
 
 training:
   i002c_v04.multi_10: 100
