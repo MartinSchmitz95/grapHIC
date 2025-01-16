@@ -1,0 +1,25 @@
+input: './samplesheet.csv'
+outdir: './unitigs-out/'
+fasta: '../multi_chrom_dataset/fasta_unitig/i002c_v04_multi_10_0.fasta'
+
+# using dnase mode
+dnase: True
+min_cis_dist: 1000
+
+# relax alignment quality
+# do local alignment instead of e2e, to respect omnic reads
+# allow up to 4 alignments; should make alignment to unitigs work better
+bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+min_mapq: 5 # mapq not meaningful with --keep
+
+#split_fastq: True
+
+# allow multi-mapping reads
+keep_multi: True
+
+skip_compartments: True
+skip_dist_decay: True
+skip_tads: True
+skip_mcool: True
+skip_balancing: False
+skip_multiqc: False
