@@ -5,8 +5,6 @@ import gzip
 import networkx as nx
 import torch
 import yaml
-from tqdm import tqdm
-#import dgl
 import shutil
 from collections import Counter
 import numpy as np
@@ -14,9 +12,6 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
 from torch_geometric.utils import from_networkx
-from tqdm import tqdm  
-from multiprocessing import Pool
-import argparse
 from Bio import AlignIO
 import re
 from datetime import datetime
@@ -305,40 +300,13 @@ class HicDatasetCreator:
                     os.remove(temp_file)
 
     def run_raft(self):
-        if self.real:
-            reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
-        else:
-            reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
+        reads_file = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
         raft_depth = 2 * self.depth
 
-        overlaps_file = os.path.join(self.overlaps_path, f"{self.genome_str}_ov.paf.gz")  
         #overlaps_file = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf.gz")
 
-        # Step 2: Run RAFT to create pil-o-gram
-        frag_prefix = os.path.join(self.tmp_path, 'raft_out')
-        pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 100000 {reads_file} {overlaps_file}", shell=True, check=True)
-        shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
-
-    def create_graphs(self):
-        if self.real:
-            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
-        else:
-            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
-
-        gfa_unitig_output = os.path.join(self.gfa_unitig_path, f'{self.genome_str}.gfa')
-        gfa_raw_output = os.path.join(self.gfa_raw_path, f'{self.genome_str}.gfa')
-
-        subprocess.run(f'./hifiasm --prt-raw --dbg-ovec -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {full_fasta}', shell=True, cwd=self.hifiasm_path)
-        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.raw.r_utg.gfa {gfa_raw_output}', shell=True, cwd=self.hifiasm_path)
-        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
-
-            # Convert GFA to FASTA
-        awk_command = "awk '/^S/{print \">\"$2;print $3}'"
-        subprocess.run(f"{awk_command} {gfa_unitig_output} > {self.fasta_unitig_path}/{self.genome_str}.fasta", shell=True, check=True)
-        print(f"Converted and moved {gfa_unitig_output} to {self.fasta_unitig_path}/{self.genome_str}.fasta")
-        subprocess.run(f"{awk_command} {gfa_raw_output} > {self.fasta_raw_path}/{self.genome_str}.fasta", shell=True, check=True)
-        print(f"Converted and moved {gfa_raw_output} to {self.fasta_raw_path}/{self.genome_str}.fasta")
+        subprocess.run(f'./hifiasm --dbg-ovec -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {reads_file}', shell=True, cwd=self.hifiasm_path)
+        #subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
 
         # Merge cis and trans overlaps
         cis_paf = f"{self.hifiasm_dump}/tmp_asm.0.ovlp.paf"
@@ -356,6 +324,32 @@ class HicDatasetCreator:
             with open(cis_paf, 'r') as infile:
                 outfile.write(infile.read())
         print(f"Cis overlaps saved to: {cis_paf_path}.gz")
+
+        # Step 2: Run RAFT to create pil-o-gram
+        frag_prefix = os.path.join(self.tmp_path, 'raft_out')
+        pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 100000 {reads_file} {merged_paf}", shell=True, check=True)
+        shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
+
+    def create_graphs(self):
+        if self.real:
+            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
+        else:
+            full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
+
+        gfa_unitig_output = os.path.join(self.gfa_unitig_path, f'{self.genome_str}.gfa')
+        gfa_raw_output = os.path.join(self.gfa_raw_path, f'{self.genome_str}.gfa')
+
+        subprocess.run(f'./hifiasm --prt-raw -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {full_fasta}', shell=True, cwd=self.hifiasm_path)
+        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.raw.r_utg.gfa {gfa_raw_output}', shell=True, cwd=self.hifiasm_path)
+        subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
+
+            # Convert GFA to FASTA
+        awk_command = "awk '/^S/{print \">\"$2;print $3}'"
+        subprocess.run(f"{awk_command} {gfa_unitig_output} > {self.fasta_unitig_path}/{self.genome_str}.fasta", shell=True, check=True)
+        print(f"Converted and moved {gfa_unitig_output} to {self.fasta_unitig_path}/{self.genome_str}.fasta")
+        subprocess.run(f"{awk_command} {gfa_raw_output} > {self.fasta_raw_path}/{self.genome_str}.fasta", shell=True, check=True)
+        print(f"Converted and moved {gfa_raw_output} to {self.fasta_raw_path}/{self.genome_str}.fasta")
 
 
         subprocess.run(f'rm {self.hifiasm_dump}/tmp_asm*', shell=True, cwd=self.hifiasm_path)
@@ -855,109 +849,3 @@ class HicDatasetCreator:
             variant_ends.append(row['POS'] + variant_length - 1)  # Adjusted to calculate the end position accurately
         print(len(variant_starts), len(variant_ends))
         return variant_starts, variant_ends
-
-    
-def create_full_dataset_dict(config):
-
-    train_dataset = config['training']
-    val_dataset = config['validation']
-
-    # Initialize the full_dataset dictionary
-    full_dataset = {}
-    # Add all keys and values from train_dataset to full_dataset
-    for key, value in train_dataset.items():
-        full_dataset[key] = value
-    # Add keys from val_dataset to full_dataset, summing values if key already exists
-    if val_dataset is not None:
-        for key, value in val_dataset.items():
-            if key in full_dataset:
-                full_dataset[key] += value
-            else:
-                full_dataset[key] = value
-
-    return full_dataset
-
-def main():
-    parser = argparse.ArgumentParser(description="Generate dataset based on configuration")
-    parser.add_argument('--ref', type=str, default='/mnt/sod2-project/csb4/wgs/martin/genome_references', help='Path to references root dir')
-    parser.add_argument('--data_path', type=str, default='/mnt/sod2-project/csb4/wgs/lovro_interns/leon/pipeline-test/', help='Path to dataset folder')   
-    parser.add_argument('--config', type=str, required=True, help='Path to configuration file')
-    args = parser.parse_args()
-
-    dataset_path = args.data_path
-    ref_base_path = args.ref
-    config_path = args.config
-    # Read the configuration file
-    with open(config_path, 'r') as config_file:
-        config = yaml.safe_load(config_file)
-
-    full_dataset = create_full_dataset_dict(config)
-
-    # Initialize the appropriate dataset creator
-    dataset_object = HicDatasetCreator(ref_base_path, dataset_path, config_path)
-
-    # Process each chromosome
-    for chrN, amount in full_dataset.items():
-        for i in range(amount):
-            gen_steps(dataset_object, chrN, i, config['gen_steps'], ref_base_path)
-
-def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
-
-    split_chrN = chrN_.split(".")
-    chrN = split_chrN[1]
-    genome = split_chrN[0]
-    chr_id = f'{chrN}_{i}'
-    ref_base = (f'{ref_base_path}/{genome}')
-        
-    #if i<10:
-    #   return
-
-    dataset_object.load_chromosome(genome, chr_id, ref_base)
-    print(f'Processing {dataset_object.genome_str}...')
-
-    if gen_step_config['sample_reads']:
-        dataset_object.simulate_pbsim_reads()
-        print(f"Done with reads simulation {chrN}_{i}")
-    if gen_step_config['create_graphs']:
-        dataset_object.create_graphs()
-        print(f"Created gfa graph {chrN}_{i}")
-
-    # run HiC pipeline
-    if gen_step_config['hic']:
-        dataset_object.process_hic()
-        dataset_object.make_hic_edges()
-
-    if gen_step_config['parse_gfa']:
-        #TODO adjust this step to read in HiC edges
-        nx_graph = dataset_object.parse_gfa()
-        dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
-        print(f"Saved nx graph {chrN}_{i}")
-
-    elif gen_step_config['ground_truth'] or gen_step_config['diploid_features'] or gen_step_config['ml_graphs'] or gen_step_config['pile-o-gram']:
-        nx_graph = dataset_object.load_nx_graph()
-        print(f"Loaded nx graph {chrN}_{i}")
-
-    if 'pile-o-gram' in gen_step_config:
-        if gen_step_config['pile-o-gram']:
-            print(f"Creating pog files with raft {chrN}_{i}")
-            dataset_object.run_raft()
-            dataset_object.create_pog_features(nx_graph)
-            print(f"Done with pog features {chrN}_{i}")
-            dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
-
-    if dataset_object.diploid and gen_step_config['diploid_features']:
-        dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
-
-    if not dataset_object.real and gen_step_config['ground_truth']:
-        dataset_object.create_hh_features(nx_graph)
-        print(f"Done with hh features {chrN}_{i}")
-        dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
-
-    if gen_step_config['ml_graphs']:
-        dataset_object.save_to_dgl_and_pyg(nx_graph)
-        print(f"Saved DGL and PYG graphs of {chrN}_{i}")
-
-    print("Done for one chromosome!")
-
-if __name__ == "__main__":
-    main()
