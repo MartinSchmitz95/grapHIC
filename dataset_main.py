@@ -84,6 +84,9 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         nx_graph = dataset_object.load_nx_graph()
         print(f"Loaded nx graph {chrN}_{i}")
 
+    #TODO merge Hi-C data here
+    # as separate edge set in heterograph
+
     if 'pile-o-gram' in gen_step_config:
         if gen_step_config['pile-o-gram']:
             print(f"Creating pog files with raft {chrN}_{i}")
