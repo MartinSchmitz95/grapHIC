@@ -135,7 +135,7 @@ def export_connection_graph(infile, outfile, unitig_dict, read_dict):
     unitig_dict = load_pickle(unitig_dict)
     read_dict = load_pickle(read_dict)
     print("constructing graph")
-    graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
+    graph = to_graph(c, lambda x: read_dict[unitig_dict[x[3:-1]][0]])
     print("saving graph")
     save_pickle(graph, outfile)
 
@@ -156,7 +156,7 @@ def main(args):
     #save_np_matrix(np_tup, outfile + '.tsv')
 
     print("converting to MultiGraph")
-    graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
+    graph = to_graph(c, lambda x: read_dict[unitig_dict[x[3:-1]][0]])
 
     print("saving MultiGraph")
     save_pickle(c, outfile + '.nx.pickle')
