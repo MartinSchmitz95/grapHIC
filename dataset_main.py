@@ -1,4 +1,4 @@
-
+#!/bin/env python
 import argparse
 import yaml
 from dataset_object import HicDatasetCreator
