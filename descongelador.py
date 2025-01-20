@@ -70,12 +70,12 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
     The edges in the graph represent hic contacts between the two contigs.
     """
     # check cooler and nodes_dict match
-    assert len(in_cooler.chromnames) == len(nodes_dict.keys())
+    #assert len(in_cooler.chromnames) == len(.keys())
     # get range of node ids
-    max_node_id = max(max(x[0], x[1]) for x in nodes_dict.values())
-    assert max_node_id == 2*len(nodes_dict) - 1 # indices start with 0
+    #max_node_id = max(max(x[0], x[1]) for x in nodes_dict.values())
+    #assert max_node_id == 2*len(nodes_dict) - 1 # indices start with 0
     # check it starts with 0
-    assert min(min(x[0], x[1]) for x in nodes_dict.values()) == 0
+    #assert min(min(x[0], x[1]) for x in nodes_dict.values()) == 0
 
     # thoughts: could also use cooler.rename()
     # but can't handle multiple substitution, and will write to disc unnecessarily
@@ -85,7 +85,7 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
 
     # init the graph with all nodes
     ret = nx.MultiGraph()
-    ret.add_nodes_from(range(max_node_id))
+    ret.add_nodes_from(range(len(in_cooler.chromnames*2)))#range(max_node_id))
 
     mat = in_cooler.matrix(balance=balance)
     # helper lambda to generate full pairwise edges between uncomplemented and complemented node ids
