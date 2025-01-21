@@ -420,7 +420,11 @@ class HicDatasetCreator:
                 self.utg_to_read_path,
                 self.read_to_node_path)
 
-
+    def load_hic_edges(self):#-> nx.MultiGraph:
+        ret = None
+        with open(os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle")), 'rb') as f:
+            ret = pickle.load(f)
+        return ret
 
     def parse_gfa(self):
         nx_graph, read_seqs, node_to_read, read_to_node, successor_dict = self.only_from_gfa()
