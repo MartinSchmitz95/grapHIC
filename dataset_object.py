@@ -56,6 +56,7 @@ class HicDatasetCreator:
         self.gfa_raw_path = os.path.join(dataset_path, "gfa_raw")
         self.overlaps_path = os.path.join(dataset_path, "overlaps")
         self.pile_o_grams_path = os.path.join(dataset_path, "pile_o_grams")
+        self.utg_2_reads_path = os.path.join(dataset_path, "utg_2_reads")
 
         # HiC stuff
         self.hic_path = os.path.join(dataset_path, "hic")
@@ -70,7 +71,7 @@ class HicDatasetCreator:
         self.gt_rescue = {}
         self.edge_info = {}
 
-        for folder in [self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
+        for folder in [self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
                        self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.read_to_node_path, self.node_to_read_path, self.overlaps_path, self.pile_o_grams_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -328,7 +329,7 @@ class HicDatasetCreator:
         # Step 2: Run RAFT to create pil-o-gram
         frag_prefix = os.path.join(self.tmp_path, 'raft_out')
         pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 100000 {reads_file} {merged_paf}", shell=True, check=True)
+        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 100000 {reads_file} {merged_paf}.gz", shell=True, check=True)
         shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
 
     def create_graphs(self):
@@ -344,13 +345,20 @@ class HicDatasetCreator:
         subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.raw.r_utg.gfa {gfa_raw_output}', shell=True, cwd=self.hifiasm_path)
         subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
 
-            # Convert GFA to FASTA
+        # Convert GFA to FASTA and gzip
         awk_command = "awk '/^S/{print \">\"$2;print $3}'"
-        subprocess.run(f"{awk_command} {gfa_unitig_output} > {self.fasta_unitig_path}/{self.genome_str}.fasta", shell=True, check=True)
-        print(f"Converted and moved {gfa_unitig_output} to {self.fasta_unitig_path}/{self.genome_str}.fasta")
-        subprocess.run(f"{awk_command} {gfa_raw_output} > {self.fasta_raw_path}/{self.genome_str}.fasta", shell=True, check=True)
-        print(f"Converted and moved {gfa_raw_output} to {self.fasta_raw_path}/{self.genome_str}.fasta")
-
+        fasta_unitig_file = f"{self.fasta_unitig_path}/{self.genome_str}.fasta"
+        fasta_raw_file = f"{self.fasta_raw_path}/{self.genome_str}.fasta"
+        
+        # Create and gzip unitig FASTA
+        subprocess.run(f"{awk_command} {gfa_unitig_output} > {fasta_unitig_file}", shell=True, check=True)
+        subprocess.run(f"gzip -f {fasta_unitig_file}", shell=True, check=True)
+        print(f"Converted and moved {gfa_unitig_output} to {fasta_unitig_file}.gz")
+        
+        # Create and gzip raw FASTA
+        subprocess.run(f"{awk_command} {gfa_raw_output} > {fasta_raw_file}", shell=True, check=True)
+        subprocess.run(f"gzip -f {fasta_raw_file}", shell=True, check=True)
+        print(f"Converted and moved {gfa_raw_output} to {fasta_raw_file}.gz")
 
         subprocess.run(f'rm {self.hifiasm_dump}/tmp_asm*', shell=True, cwd=self.hifiasm_path)
 
@@ -421,10 +429,12 @@ class HicDatasetCreator:
 
 
     def parse_gfa(self):
-        nx_graph, read_seqs, node_to_read, read_to_node, successor_dict = self.only_from_gfa()
+        nx_graph, read_seqs, node_to_read, read_to_node, utg_2_reads = self.only_from_gfa()
         # Save data
         self.pickle_save(node_to_read, self.node_to_read_path)
         self.pickle_save(read_to_node, self.read_to_node_path)
+        self.pickle_save(utg_2_reads, self.utg_2_reads_path)
+
         
         """
         self.create_reads_fasta(read_seqs, self.chr_id)  # Add self.chr_id as an argument
@@ -440,7 +450,7 @@ class HicDatasetCreator:
         """
 
         return nx_graph  
-
+    
     def only_from_gfa(self):
         self.assembler = "hifiasm"
         training = not self.real
@@ -454,11 +464,13 @@ class HicDatasetCreator:
         graph_nx = nx.DiGraph()
         read_to_node, node_to_read, old_read_to_utg = {}, {}, {}  ##########
         read_to_node2 = {}
+        utg_2_reads = {}
         #edges_dict = {}
         read_lengths, read_seqs = {}, {}  # Obtained from the GFA
         read_idxs, read_strands, read_starts, read_ends, read_chrs, read_variants, variant_class = {}, {}, {}, {}, {}, {}, {}  # Obtained from the FASTA/Q headers
         edge_ids, prefix_lengths, overlap_lengths, overlap_similarities = {}, {}, {}, {}
         no_seqs_flag = self.assembler == 'raven'
+
 
         time_start = datetime.now()
         print(f'Starting to loop over GFA')
@@ -509,30 +521,27 @@ class HicDatasetCreator:
                     read_lengths[virt_idx] = length
 
                     if id.startswith('utg'):
-                        # The issue here is that in some cases, one unitig can consist of more than one read
-                        # So this is the adapted version of the code that supports that
-                        # The only things of importance here are read_to_node2 dict (not overly used)
-                        # And id variable which I use for obtaining positions during training (for the labels)
-                        # I don't use it for anything else, which is good
+                        # Store the original unitig ID before it gets modified
+                        utg_id = id
                         ids = []
+                        utg_2_reads[utg_id] = []  # Use original utg_id instead of id
                         while True:
                             line = all_lines[line_idx]
                             line = line.strip().split()
-                            #print(line)
                             if line[0] != 'A':
                                 break
                             line_idx += 1
                             tag = line[0]
-                            utg_id = line[1]
+                            utg_id_line = line[1]
                             read_orientation = line[3]
                             utg_to_read = line[4]
                             ids.append((utg_to_read, read_orientation))
+                            utg_2_reads[utg_id].append(utg_to_read)  # Use original utg_id
                             read_to_node2[utg_to_read] = (real_idx, virt_idx)
 
                             id = ids
                             node_to_read[real_idx] = id
                             node_to_read[virt_idx] = id
-                            
 
                     if training:
                         #print(f"id: {id}")
@@ -688,8 +697,18 @@ class HicDatasetCreator:
 
         # Print number of nodes and edges in graph
     
-        return graph_nx, read_seqs, node_to_read, read_to_node, successor_dict
+        return graph_nx, read_seqs, node_to_read, read_to_node, utg_2_reads
 
+    def nx_utg_ftrs(self, nx_graph):
+        strand = nx.get_node_attributes(nx_graph, 'read_strand')
+        start = nx.get_node_attributes(nx_graph, 'read_start')
+        end = nx.get_node_attributes(nx_graph, 'read_end')
+        variant = nx.get_node_attributes(nx_graph, 'read_variant')
+        chr = nx.get_node_attributes(nx_graph, 'read_chr')
+
+        print(strand)
+        
+        exit()
     def create_pog_features(self, nx_graph):
         """
         Create pog_median, pog_min, and pog_max features for each node and edge based on pile o gram data
