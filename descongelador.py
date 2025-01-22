@@ -100,10 +100,9 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
     ret.add_weighted_edges_from(
             # value needs to be coerced to single float
             itertools.chain.from_iterable( # apparently the standard way to flatMap in python
-                                          full_pairwise(get_idtup(i_lab), get_idtup(j_lab), float(mat[i, j][:]))
-                                          for j, j_lab in enumerate(in_cooler.chromnames)
-                                          for i, i_lab in enumerate(in_cooler.chromnames)
-                                          if j > i # will not generate self-edges
+                                          full_pairwise(get_idtup(in_cooler.chromnames[i]), get_idtup(in_cooler.chromnames[j]), float(w))
+                                          for i, j, w in np.argwhere(mat) # skip 0 entries
+                                          if i > j # will not generate self-edges
                                           #if i != j # will not generate self-edges
                                           ))
     return ret
