@@ -88,6 +88,8 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         # not sure if logic code in here is the prettiest, but should work
         import networkx as nx
         hic_graph = dataset_object.load_hic_edges()
+        nx.set_edge_attributes(hic_graph, ["type"], "hic")
+        nx.set_edge_attributes(nx_graph, ["type"], "overlap")
         nx_graph = nx.compose(hic_graph, nx_graph)
 
     if 'pile-o-gram' in gen_step_config:
