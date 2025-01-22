@@ -34,7 +34,8 @@ def aggr_chrs(in_path: str) -> Cooler:
     # cooler requires a URI on the filesystem, so use a tmpfile
     tmp = tempfile.NamedTemporaryFile().name
 
-    factor = np.ceil(max(cooler.chromsizes)/c.binsize) + 2 # +2 to be on the safe side
+    c = Cooler(inpath)
+    factor = np.ceil(max(c.chromsizes)/c.binsize) + 2 # +2 to be on the safe side
     cooler.coarsen_cooler(in_path, tmp, sys.maxsize, factor)
 
     return Cooler(tmp)
