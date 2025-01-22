@@ -1,4 +1,4 @@
-
+#!/bin/env python
 import argparse
 import yaml
 from dataset_object import HicDatasetCreator
@@ -75,7 +75,6 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         dataset_object.make_hic_edges()
 
     if gen_step_config['parse_gfa']:
-        #TODO adjust this step to read in HiC edges
         nx_graph = dataset_object.parse_gfa()
         dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
         print(f"Saved nx graph {chrN}_{i}")
@@ -83,6 +82,13 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
     elif gen_step_config['ground_truth'] or gen_step_config['diploid_features'] or gen_step_config['ml_graphs'] or gen_step_config['pile-o-gram']:
         nx_graph = dataset_object.load_nx_graph()
         print(f"Loaded nx graph {chrN}_{i}")
+
+    # update graph to include hic edges
+    if gen_step_config['hic']:
+        # not sure if logic code in here is the prettiest, but should work
+        import networkx as nx
+        hic_graph = dataset_object.load_hic_edges()
+        nx_graph = nx.compose(hic_graph, nx_graph)
 
     if 'pile-o-gram' in gen_step_config:
         if gen_step_config['pile-o-gram']:

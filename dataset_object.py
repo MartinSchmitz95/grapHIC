@@ -66,6 +66,7 @@ class HicDatasetCreator:
         self.pyg_graphs_path = os.path.join(dataset_path, "pyg_graphs")
         self.read_to_node_path = os.path.join(dataset_path, "read_to_node")
         self.node_to_read_path = os.path.join(dataset_path, "node_to_read")
+        self.utg_to_read_path = os.path.join(dataset_path, "utg_2_reads")
 
         self.deadends = {}
         self.gt_rescue = {}
@@ -424,9 +425,14 @@ class HicDatasetCreator:
         export_connection_graph(
                 os.path.join(self.hic_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
                 os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle"),
+                self.utg_to_read_path,
                 self.read_to_node_path)
 
-
+    def load_hic_edges(self):#-> nx.MultiGraph:
+        ret = None
+        with open(os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle")), 'rb') as f:
+            ret = pickle.load(f)
+        return ret
 
     def parse_gfa(self):
         nx_graph, read_seqs, node_to_read, read_to_node, utg_2_reads = self.only_from_gfa()

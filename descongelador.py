@@ -5,7 +5,7 @@ import tempfile
 import math
 import itertools
 
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Callable
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,8 +34,8 @@ def aggr_chrs(in_path: str) -> Cooler:
     # cooler requires a URI on the filesystem, so use a tmpfile
     tmp = tempfile.NamedTemporaryFile().name
 
-    #TODO calculate exact factor?
-    cooler.coarsen_cooler(in_path, tmp, sys.maxsize, 900) # factor should be infinity
+    factor = np.ceil(max(cooler.chromsizes)/c.binsize) + 2 # +2 to be on the safe side
+    cooler.coarsen_cooler(in_path, tmp, sys.maxsize, factor)
 
     return Cooler(tmp)
 
@@ -63,19 +63,19 @@ def to_np_matrix(in_cooler: Cooler, balance=False) -> Tuple[np.array, np.ndarray
 
     return (chrnames, array)
 
-def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGraph:
+def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiGraph:
     """
-    Takes a coarsened cooler and a dict mapping contig names to pairs of nodes and constructs a graph from it.
+    Takes a coarsened cooler and a lambda mapping unitig names to pairs of node ids and constructs a graph from it.
     :returns: a networkx MultiGraph with two nodes corresponding to one contig/its complement.
     The edges in the graph represent hic contacts between the two contigs.
     """
     # check cooler and nodes_dict match
-    assert len(in_cooler.chromnames) == len(nodes_dict.keys())
+    #assert len(in_cooler.chromnames) == len(.keys())
     # get range of node ids
-    max_node_id = max(max(x[0], x[1]) for x in nodes_dict.values())
-    assert max_node_id == 2*len(nodes_dict) - 1 # indices start with 0
+    #max_node_id = max(max(x[0], x[1]) for x in nodes_dict.values())
+    #assert max_node_id == 2*len(nodes_dict) - 1 # indices start with 0
     # check it starts with 0
-    assert min(min(x[0], x[1]) for x in nodes_dict.values()) == 0
+    #assert min(min(x[0], x[1]) for x in nodes_dict.values()) == 0
 
     # thoughts: could also use cooler.rename()
     # but can't handle multiple substitution, and will write to disc unnecessarily
@@ -85,21 +85,21 @@ def to_graph(in_cooler: Cooler, nodes_dict: Dict, balance=False) -> nx.MultiGrap
 
     # init the graph with all nodes
     ret = nx.MultiGraph()
-    ret.add_nodes_from(range(max_node_id))
+    ret.add_nodes_from(range(len(in_cooler.chromnames*2)))#range(max_node_id))
 
     mat = in_cooler.matrix(balance=balance)
     # helper lambda to generate full pairwise edges between uncomplemented and complemented node ids
-    full_pairwise = lambda i_lab, j_lab, val: [
-            (nodes_dict[i_lab][0], nodes_dict[j_lab][0], val),
-            (nodes_dict[i_lab][0], nodes_dict[j_lab][1], val),
-            (nodes_dict[i_lab][1], nodes_dict[j_lab][0], val),
-            (nodes_dict[i_lab][1], nodes_dict[j_lab][1], val),
+    full_pairwise = lambda idtup1, idtup2, val: [
+            (idtup1[0], idtup2[0], val),
+            (idtup1[0], idtup2[1], val),
+            (idtup1[1], idtup2[0], val),
+            (idtup1[1], idtup2[1], val),
             ]
     # iterate through every two distinct nodes once
     ret.add_weighted_edges_from(
             # value needs to be coerced to single float
             itertools.chain.from_iterable( # apparently the standard way to flatMap in python
-                                          full_pairwise(i_lab, j_lab, float(mat[i, j][:]))
+                                          full_pairwise(get_idtup(i_lab), get_idtup(j_lab), float(mat[i, j][:]))
                                           for j, j_lab in enumerate(in_cooler.chromnames)
                                           for i, i_lab in enumerate(in_cooler.chromnames)
                                           if j > i # will not generate self-edges
@@ -128,13 +128,14 @@ def export_image(intuple, path, scale=id):
     """
     plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
-def export_connection_graph(infile, outfile, chromdict):
+def export_connection_graph(infile, outfile, unitig_dict, read_dict):
     print("aggregating cooler")
     c = aggr_chrs(infile)
     print("loading contig dict")
-    chromdict = load_pickle(chromdict)
+    unitig_dict = load_pickle(unitig_dict)
+    read_dict = load_pickle(read_dict)
     print("constructing graph")
-    graph = to_graph(c, chromdict)
+    graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
     print("saving graph")
     save_pickle(graph, outfile)
 
@@ -142,7 +143,8 @@ def main(args):
     #TODO do proper argparsing later
     infile = args[1]
     outfile = args[2]
-    chromdict = load_pickle(args[3])
+    unitig_dict = load_pickle(args[3])
+    read_dict = load_pickle(args[4])
 
     c = aggr_chrs(infile)
 
@@ -150,13 +152,16 @@ def main(args):
 
     #print(np_tup)
 
-    save_np_matrix(np_tup, outfile + '.tsv')
+    #print("saving NP matrix")
+    #save_np_matrix(np_tup, outfile + '.tsv')
 
-    graph = to_graph(c, chromdict)
-    print(graph)
+    print("converting to MultiGraph")
+    graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
 
+    print("saving MultiGraph")
     save_pickle(c, outfile + '.nx.pickle')
 
+    print("plotting image")
     export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
 
 

@@ -1,7 +1,7 @@
 paths:
   sample_profile: hg002hifi
   pbsim_path: /home/stuleon/vendor/pbsim3
-  hifiasm_path: /home/stuleon/vendor/hifiasm_020/
+  hifiasm_path: /home/stuleon/vendor/hifiasm-0.23.0/
   raven_path: /home/stuleon/vendor/heron-raven
   herro_path: /home/stuleon/vendor/herro_folder
   hifiasm_dump: /home/stuleon/scratch/dumps/hifiasm_dump_4
