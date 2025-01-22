@@ -150,7 +150,8 @@ def main(args):
 
     np_tup = to_np_matrix(c)
 
-    #print(np_tup)
+    print("saving matrix to pickle")
+    save_pickle(np_tup[1], outfile + '.np.pickle')
 
     #print("saving NP matrix")
     #save_np_matrix(np_tup, outfile + '.tsv')
@@ -159,7 +160,7 @@ def main(args):
     graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
 
     print("saving MultiGraph")
-    save_pickle(c, outfile + '.nx.pickle')
+    save_pickle(graph, outfile + '.nx.pickle')
 
     print("plotting image")
     export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
