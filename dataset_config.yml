@@ -7,7 +7,7 @@ paths:
   hifiasm_dump: /home/stuleon/scratch/dumps/hifiasm_dump_4
   raft_path: /home/stuleon/vendor/RAFT
   centromere_coords: /dev/null
-  hic_readsfiles_pairs :
+  hic_readsfiles_pairs:
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R1.fastq.gz','/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R2.fastq.gz']
   nextflow_path: "$(which nextflow)"

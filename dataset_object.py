@@ -415,6 +415,11 @@ class HicDatasetCreator:
             ret = pickle.load(f)
         return ret
 
+    def merge_graphs(self, nx_graph, hic_graph):
+        nx.set_edge_attributes(hic_graph, ["type"], "hic")
+        nx.set_edge_attributes(nx_graph, ["type"], "overlap")
+        return nx.compose(nx.MultiGraph(nx_graph), nx.MultiGraph(hic_graph))
+
     def parse_gfa(self):
         nx_graph, read_seqs, unitig_2_node, utg_2_reads = self.only_from_gfa()
         # Save data

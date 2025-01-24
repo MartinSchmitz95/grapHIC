@@ -86,14 +86,11 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
     # update graph to include hic edges
     if gen_step_config['hic']:
         # not sure if logic code in here is the prettiest, but should work
-        import networkx as nx
         hic_graph = dataset_object.load_hic_edges()
         print("loaded Hi-C graph")
-        nx.set_edge_attributes(hic_graph, ["type"], "hic")
-        nx.set_edge_attributes(nx_graph, ["type"], "overlap")
-        nx_graph = nx.compose(hic_graph, nx_graph)
+        nx_graph = dataset_object.merged_graphs(nx_graph, hic_graph)
         print("merged Hi-C graph")
-        dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
+        dataset_object.pickle_save(nx_graph, dataset_object.merged_graphs_path)
         print("saved merged Hi-C graph")
 
     if 'pile-o-gram' in gen_step_config:
