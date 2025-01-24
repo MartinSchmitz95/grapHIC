@@ -15,7 +15,7 @@ import yaml
 # Disable
 #from torch_geometric.utils import to_undirected
 
-from SGformer import SGFormer
+from SGformer_HG import SGFormer
 from torch_geometric.utils import degree
 import torch_sparse
 
@@ -140,6 +140,7 @@ def fraction_correct_yak(y_true, y_pred):
     device = y_true.device
     y_true = y_true.to(device)
     y_pred = y_pred.to(device)
+
     #print(y_true)
     #print(f"y_true and y_pred {y_true.shape} {y_pred.shape}")
 
@@ -193,7 +194,7 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
                 g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
                 g = g.to(device)
 
-                yak_predictions = model(g.x, g.edge_index).squeeze()
+                yak_predictions = model(g).squeeze()
                 pred_mean.append(yak_predictions.mean().item())
                 pred_std.append(yak_predictions.std().item())
 
