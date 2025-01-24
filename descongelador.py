@@ -84,27 +84,25 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
     # maybe try again if too slow
     # maybe do twice & merge the multigraphs to handle complement IDs
 
+    # balance and turn into matrix hic contacs
+    mat = in_cooler.matrix(balance=balance)
+
     # init the graph with all nodes
     ret = nx.MultiGraph()
     ret.add_nodes_from(range(len(in_cooler.chromnames*2)))#range(max_node_id))
-
-    mat = in_cooler.matrix(balance=balance)
-    # helper lambda to generate full pairwise edges between uncomplemented and complemented node ids
-    full_pairwise = lambda idtup1, idtup2, val: [
-            (idtup1[0], idtup2[0], val),
-            (idtup1[0], idtup2[1], val),
-            (idtup1[1], idtup2[0], val),
-            (idtup1[1], idtup2[1], val),
-            ]
     # iterate through every two distinct nodes once
-    ret.add_weighted_edges_from(
-            # value needs to be coerced to single float
-            itertools.chain.from_iterable( # apparently the standard way to flatMap in python
-                                          full_pairwise(get_idtup(in_cooler.chromnames[i]), get_idtup(in_cooler.chromnames[j]), float(w))
-                                          for i, j, w in np.argwhere(mat) # skip 0 entries
-                                          if i > j # will not generate self-edges
-                                          #if i != j # will not generate self-edges
-                                          ))
+    for i, j, w in np.argwhere(mat):
+        if i > j: # will not generate self-edges
+            continue
+        i_tup = get_idtup(in_cooler.chromnames[i])
+        j_tup = get_idtup(in_cooler.chromnames[j])
+
+        # generate full pairwise edges
+        ret.add_edge(i_tup[0], j_tup[0], weight=w)
+        ret.add_edge(i_tup[0], j_tup[1], weight=w)
+        ret.add_edge(i_tup[1], j_tup[0], weight=w)
+        ret.add_edge(i_tup[1], j_tup[1], weight=w)
+
     return ret
 
 def load_pickle(filepath) -> Dict:
