@@ -61,6 +61,7 @@ nextflow: |
       resourceLimits = [ cpus: 24, memory: 768.GB, time: 72.h ]
   }
 training:
-  i002c_v04.multi_10: 100
+  i002c_v04.multi_21: 100
+  i002c_v04.multi_10: 0
 validation:
   i002c_v04.multi_5: 0
