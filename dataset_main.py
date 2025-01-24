@@ -93,7 +93,7 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
     if 'pile-o-gram' in gen_step_config:
         if gen_step_config['pile-o-gram']:
             print(f"Creating pog files with raft {chrN}_{i}")
-            #dataset_object.run_raft()
+            dataset_object.run_raft()
             #dataset_object.nx_utg_ftrs(nx_graph)
             dataset_object.create_pog_features(nx_graph)
             print(f"Done with pog features {chrN}_{i}")
@@ -108,7 +108,9 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
 
     if gen_step_config['ml_graphs']:
-        dataset_object.save_to_dgl_and_pyg(nx_graph)
+        nx_graph = dataset_object.load_nx_graph(multi=True)
+        nx_multi_reduced = dataset_object.convert_to_single_stranded(nx_graph)
+        dataset_object.save_to_dgl_and_pyg(nx_multi_reduced)
         print(f"Saved DGL and PYG graphs of {chrN}_{i}")
 
     print("Done for one chromosome!")
