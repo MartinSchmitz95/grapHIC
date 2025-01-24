@@ -368,7 +368,7 @@ class HicDatasetCreator:
                          "-o", self.hic_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        subprocess.run(call, shell=True, check=True, cwd=self.root_path)
+        subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
@@ -404,7 +404,7 @@ class HicDatasetCreator:
 
         with open(path, 'wt') as f:
             f.write("sample,fastq_1,fastq_2\n")
-            f.writelines([','.join([self.sample_name, f_pair[0], f_pair[1]]) for f_pair in self.hic_readsfiles_pairs])
+            f.writelines([','.join([self.sample_name, f_pair[0], f_pair[1]]) + '\n' for f_pair in self.hic_readsfiles_pairs])
 
         return path
 
