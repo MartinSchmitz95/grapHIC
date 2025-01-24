@@ -26,8 +26,9 @@ class HicDatasetCreator:
         #self.full_dataset, self.val_dataset, self.train_dataset = utils.create_dataset_dicts(data_config=data_config)
         self.paths = config['paths']
         gen_config = config['gen_config']
-        nfcore_hic_config = config['nfcore_hic']
-        nextflow_config = config['nextflow']
+
+        self.nfcore_hic = config['nfcore_hic']
+        self.nextflow_config = config['nextflow']
         self.genome_str = ""
         self.genome = "hg002"
         self.sample_name = self.genome # not sure if should always be the same
@@ -76,7 +77,7 @@ class HicDatasetCreator:
         self.edge_info = {}
 
         for folder in [self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
-                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path,
+                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path, self.hic_path,
                        self.hic_graphs_path, self.merged_graphs_path, self.unitig_to_node_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -352,7 +353,7 @@ class HicDatasetCreator:
         TODO specify config for pipeline from here or as separate config ymls?
         """
         # set fasta param to what the filename out is
-        self.nfcore_hic_config["fasta"] = self.fasta_unitig_path
+        self.nfcore_hic["fasta"] = self.fasta_unitig_path
 
         nf_conf = self._write_nf_config()
         nf_params = self._write_nf_params()
@@ -360,31 +361,35 @@ class HicDatasetCreator:
 
         call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path,
                         "-c", nf_conf,
-                        "-params-file", nf_params, "-i", samplesheet,
-                         "-o", self.hic_path, "-work", self.tmp_path, "-profile docker"])
+                        "-params-file", nf_params, "--input", samplesheet,
+                         "-o", self.hic_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        subprocess.run(call, shell=True, cwd=self.dataset_path)
+        subprocess.run(call, shell=True, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
         Writes the nextflow config file for nf-core/hic to a file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+        path = os.path.join(self.hic_path, filename)
+        with open(path, 'wt') as f:
             # nf config is stored as a text blurb in the yml, can just write directly
             f.write(self.nextflow_config)
 
-        return filename
+        return path
 
     def _write_nf_params(self, filename="params.yml") -> os.PathLike:
         """
         Writes the parameters for nf-core/hic to a yml file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        with open(os.path.join(self.hic_path, filename), 'wt') as f:
-            yml.safe_dump(self.nfcore_hic_config)
-        return filename
+        path = os.path.join(self.hic_path, filename)
+
+        with open(path, 'wt') as f:
+            yaml.safe_dump(self.nfcore_hic, f)
+
+        return path
 
     def _write_samplesheet(self, filename="samplesheet.csv") -> os.PathLike:
         """
@@ -392,10 +397,13 @@ class HicDatasetCreator:
         Multiple hic runs may be used per sample. They are written as individual lines to the sample sheet under the same sample name, and will be merged by nf-core/hic.
         Allows all configuration to stay in dataset_config.yml.
         """
-        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+        path = os.path.join(self.hic_path, filename)
+
+        with open(path, 'wt') as f:
             f.write("sample,fastq_1,fastq_2\n")
             f.writelines([','.join([self.sample_name, f_pair[0], f_pair[1]]) for f_pair in self.hic_readsfiles_pairs])
-        return filename
+
+        return path
 
     def make_hic_edges(self):
         """
