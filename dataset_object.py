@@ -354,7 +354,8 @@ class HicDatasetCreator:
         fasta_unitig_file = f"{self.fasta_unitig_path}/{self.genome_str}.fasta"
         # for now nf-core/hic does not support compressed input, decompress it 
         #TODO make PR
-        subprocess.run(f"gunzip -k {fasta_unitig_file}.gz", shell=True, check=True)
+        if not os.path.exists(fasta_unitig_file):
+            subprocess.run(f"gunzip -k {fasta_unitig_file}.gz", shell=True, check=True)
         # set fasta param to what the filename out is
         self.nfcore_hic["fasta"] = fasta_unitig_file
 
