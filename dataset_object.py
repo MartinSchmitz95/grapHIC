@@ -691,8 +691,8 @@ class HicDatasetCreator:
         variant = nx.get_node_attributes(nx_graph, 'read_variant')
         chr = nx.get_node_attributes(nx_graph, 'read_chr')
         print(strand)
-        
         exit()
+
     def create_pog_features(self, nx_graph):
         """
         Create pog_median, pog_min, and pog_max features for each node and edge based on pile o gram data
