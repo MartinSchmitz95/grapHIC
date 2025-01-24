@@ -350,10 +350,13 @@ class HicDatasetCreator:
         """
         Runs nf-core/hic on the HiC reads provided in the data config on the unitigs fasta.
         This finds chromosomal contacts between different unitigs on the same chromosome/haplotype.
-        TODO specify config for pipeline from here or as separate config ymls?
         """
+        fasta_unitig_file = f"{self.fasta_unitig_path}/{self.genome_str}.fasta"
+        # for now nf-core/hic does not support compressed input, decompress it 
+        #TODO make PR
+        subprocess.run(f"gunzip -k {fasta_unitig_file}.gz", shell=True, check=True)
         # set fasta param to what the filename out is
-        self.nfcore_hic["fasta"] = self.fasta_unitig_path
+        self.nfcore_hic["fasta"] = fasta_unitig_file
 
         nf_conf = self._write_nf_config()
         nf_params = self._write_nf_params()
@@ -365,7 +368,7 @@ class HicDatasetCreator:
                          "-o", self.hic_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        subprocess.run(call, shell=True, cwd=self.root_path)
+        subprocess.run(call, shell=True, check=True, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
