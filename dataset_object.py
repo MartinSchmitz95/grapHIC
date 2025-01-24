@@ -16,6 +16,8 @@ from Bio import AlignIO
 import re
 from datetime import datetime
 import pandas as pd
+from torch_geometric.data import Data
+from torch_geometric.utils import degree
 
 class HicDatasetCreator:
     def __init__(self, ref_path, dataset_path, data_config='dataset.yml'):
@@ -67,20 +69,21 @@ class HicDatasetCreator:
         self.read_to_node_path = os.path.join(dataset_path, "read_to_node")
         self.node_to_read_path = os.path.join(dataset_path, "node_to_read")
         self.utg_to_read_path = os.path.join(dataset_path, "utg_2_reads")
+        self.hic_graphs_path = os.path.join(dataset_path, "hic_graphs")
+        self.merged_graphs_path = os.path.join(dataset_path, "merged_graphs")
 
         self.deadends = {}
         self.gt_rescue = {}
         self.edge_info = {}
 
         for folder in [self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
-                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.read_to_node_path, self.node_to_read_path, self.overlaps_path, self.pile_o_grams_path]:
+                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.read_to_node_path, self.node_to_read_path, self.overlaps_path, self.pile_o_grams_path,
+                       self.hic_graphs_path, self.merged_graphs_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
         #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
-        self.node_attrs = ['read_length']
-        if not self.real:
-            self.node_attrs.extend('gt_hap')
+        self.node_attrs = ['read_length', 'pog_median', 'pog_median_capped', 'pog_max', 'pog_min', 'in_degree', 'out_degree']
 
     def load_chromosome(self, genome, chr_id, ref_path):
         self.genome_str = f'{genome}_{chr_id}'
@@ -157,8 +160,11 @@ class HicDatasetCreator:
         else:
             return {read.id: read.description for read in SeqIO.parse(reads_path, filetype)}
     
-    def load_nx_graph(self):
-        file_name = os.path.join(self.nx_graphs_path, f'{self.genome_str}.pkl')
+    def load_nx_graph(self, multi=False):
+        if multi:
+            file_name = os.path.join(self.merged_graphs_path, f'{self.genome_str}.pkl')
+        else:
+            file_name = os.path.join(self.nx_graphs_path, f'{self.genome_str}.pkl')
         with open(file_name, 'rb') as file:
             nx_graph = pickle.load(file)
         print(f"Loaded nx graph {self.genome_str}")
@@ -178,29 +184,6 @@ class HicDatasetCreator:
         with open(file_name, 'wb') as f:
             pickle.dump(pickle_object, f) 
         print(f"File saved successfully to {file_name}")
-
-    def save_to_dgl_and_pyg(self, nx_graph):
-        print()
-        print(f"Total nodes in graph: {nx_graph.number_of_nodes()}")
-        
-        # Get list of available node attributes in the graph
-        available_attrs = []
-        if len(nx_graph.nodes) > 0:
-            sample_node = list(nx_graph.nodes)[0]
-            available_attrs = list(nx_graph.nodes[sample_node].keys())
-        
-        # Filter node_attrs to only include attributes that exist in the graph
-        node_attrs_to_use = [attr for attr in self.node_attrs if attr in available_attrs]
-        
-        print(f"Using node attributes: {node_attrs_to_use}")
-        
-        # Create PyG graph directly from networkx
-        pyg_data = from_networkx(nx_graph, group_node_attrs=node_attrs_to_use)
-        
-        # Save PyG graph
-        pyg_file = os.path.join(self.pyg_graphs_path, f'{self.genome_str}.pt')
-        torch.save(pyg_data, pyg_file)
-        print(f"Saved PyG graph of {self.genome_str}")
 
     def simulate_pbsim_reads(self):
         if self.diploid:
@@ -430,7 +413,7 @@ class HicDatasetCreator:
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
-        with open(os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle")), 'rb') as f:
+        with open(os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
             ret = pickle.load(f)
         return ret
 
@@ -662,9 +645,6 @@ class HicDatasetCreator:
 
                     overlap_lengths[(src_real, dst_real)] = ol_length
                     overlap_lengths[(src_virt, dst_virt)] = ol_length
-
-                    prefix_lengths[(src_real, dst_real)] = read_lengths[src_real] - ol_length
-                    prefix_lengths[(src_virt, dst_virt)] = read_lengths[src_virt] - ol_length
         
         elapsed = (datetime.now() - time_start).seconds
         print(f'Elapsed time: {elapsed}s')
@@ -711,7 +691,6 @@ class HicDatasetCreator:
         end = nx.get_node_attributes(nx_graph, 'read_end')
         variant = nx.get_node_attributes(nx_graph, 'read_variant')
         chr = nx.get_node_attributes(nx_graph, 'read_chr')
-
         print(strand)
         
         exit()
@@ -758,6 +737,10 @@ class HicDatasetCreator:
         nx.set_node_attributes(nx_graph, pog_median, 'pog_median')
         nx.set_node_attributes(nx_graph, pog_min, 'pog_min')
         nx.set_node_attributes(nx_graph, pog_max, 'pog_max')
+        
+        # Add capped version of pog_median
+        pog_median_capped = {node: min(3, value) for node, value in pog_median.items()}
+        nx.set_node_attributes(nx_graph, pog_median_capped, 'pog_median_capped')
         
         print(f"Added pile-o-gram features to {len(pog_median)} nodes.")
 
@@ -874,3 +857,180 @@ class HicDatasetCreator:
             variant_ends.append(row['POS'] + variant_length - 1)  # Adjusted to calculate the end position accurately
         print(len(variant_starts), len(variant_ends))
         return variant_starts, variant_ends
+
+
+    def convert_to_single_stranded(self, nx_graph):
+        """
+        Converts double-stranded graph to single-stranded by removing odd-numbered nodes
+        and redirecting their edges to their even-numbered complements.
+        """
+        print(f"Initial graph: {nx_graph.number_of_nodes()} nodes, {nx_graph.number_of_edges()} edges")
+        
+        ##### START DEBUG
+
+
+        # Convert to MultiDiGraph and set all existing edges as 'overlap' type
+        multi_graph = nx.MultiDiGraph()
+        
+        # Copy all nodes and their attributes
+        for node, data in nx_graph.nodes(data=True):
+            multi_graph.add_node(node, **data)
+        
+        # Copy all edges and set them as 'overlap' type
+        for u, v, data in nx_graph.edges(data=True):
+            multi_graph.add_edge(u, v, type='overlap', weight=data.get('weight', 1.0))
+        
+        nx_graph = multi_graph
+        ##### END DEBUG
+
+
+        # Create new directed multigraph for single-stranded version
+        single_stranded = nx.MultiGraph()
+        
+        # Create mapping from even nodes to consecutive indices
+        old_to_new = {}
+        new_id = 0
+        for node in sorted(multi_graph.nodes()):
+            if node % 2 == 0:  # Keep even nodes
+                old_to_new[node] = new_id
+                new_id += 1
+        
+        # Copy node attributes for even nodes with new IDs
+        for old_node, new_node in old_to_new.items():
+            single_stranded.add_node(new_node)
+            single_stranded.nodes[new_node].update(multi_graph.nodes[old_node])
+        
+        # Process edges
+        processed_edges = set()  # Track processed edge pairs to avoid duplicates
+        
+        for u, v, key, data in multi_graph.edges(data=True, keys=True):
+            edge_type = data['type']
+            weight = data.get('weight', 1.0)
+            
+            # Convert nodes to their even complements if they're odd
+            u_even = u if u % 2 == 0 else u - 1
+            v_even = v if v % 2 == 0 else v - 1
+            
+            # Get new IDs for the even nodes
+            u_new = old_to_new[u_even]
+            v_new = old_to_new[v_even]
+            
+            # Create unique edge identifier
+            edge_id = tuple(sorted([u_new, v_new]) + [edge_type])
+            
+            if edge_id not in processed_edges:
+                # Add edge between nodes with new IDs (undirected)
+                single_stranded.add_edge(u_new, v_new, type=edge_type, weight=weight)
+                processed_edges.add(edge_id)
+        
+        print(f"Converted graph: {single_stranded.number_of_nodes()} nodes, {single_stranded.number_of_edges()} edges")
+        return single_stranded
+    
+    
+    
+    def save_to_dgl_and_pyg(self, nx_graph):
+        print()
+        print(f"Total nodes in graph: {nx_graph.number_of_nodes()}")
+        # Assert that nx_graph is a multigraph
+        assert isinstance(nx_graph, nx.MultiGraph) or isinstance(nx_graph, nx.MultiDiGraph), "Graph must be a NetworkX MultiGraph or MultiDiGraph"
+        
+        # Get number of nodes
+        num_nodes = nx_graph.number_of_nodes()
+        
+        # Initialize lists for edges, types and weights
+        edge_list = []
+        edge_types = []
+        edge_weights = []
+        
+        # Process each edge type
+        edge_type_map = {'overlap': 0, 'hic': 1}
+        
+        # Convert edges for each type
+        for (u, v, key, data) in nx_graph.edges(data=True, keys=True):
+            edge_type = data['type']  # Will crash if type not found
+            edge_list.append([u, v])
+            edge_types.append(edge_type_map[edge_type])  # Will crash if invalid type
+            edge_weights.append(data['weight'])  # Will crash if weight not found
+            
+        # Convert to tensors
+        edge_index = torch.tensor(edge_list, dtype=torch.long).t()
+        edge_type = torch.tensor(edge_types, dtype=torch.long)
+        edge_weight = torch.tensor(edge_weights, dtype=torch.float)
+        
+        # Now compute degrees after edge_index is created
+        out_degrees = degree(edge_index[0], num_nodes=num_nodes)
+        in_degrees = degree(edge_index[1], num_nodes=num_nodes)
+        
+        # Add degree information to the graph
+        for node in range(num_nodes):
+            nx_graph.nodes[node]['in_degree'] = float(in_degrees[node])
+            nx_graph.nodes[node]['out_degree'] = float(out_degrees[node])
+        
+        # Create node features using all features in self.node_attrs
+        features = []
+        for node in range(num_nodes):
+            node_features = []
+            for feat in self.node_attrs:
+                if feat in nx_graph.nodes[node]:
+                    node_features.append(float(nx_graph.nodes[node][feat]))
+                else:
+                    print(f"Warning: Feature {feat} not found for node {node}")
+                    node_features.append(0.0)  # Default value if feature is missing
+            features.append(node_features)
+        x = torch.tensor(features, dtype=torch.float)
+
+        gt_hap = [nx_graph.nodes[node]['gt_hap'] for node in range(num_nodes)]
+        gt_tensor = torch.tensor(gt_hap, dtype=torch.long)
+        
+        # Create PyG Data object
+        pyg_data = Data(
+            x=x,
+            edge_index=edge_index,
+            edge_type=edge_type,
+            edge_weight=edge_weight,
+            y=gt_tensor
+        )
+
+        # Add read_length to normalization list
+        node_attrs_to_normalize = ['read_length', 'pog_median', 'pog_max', 'pog_min', 'in_degree', 'out_degree']
+        self.normalize_ftrs(pyg_data, node_attrs_to_normalize)
+
+        # Save PyG graph
+        pyg_file = os.path.join(self.pyg_graphs_path, f'{self.genome_str}.pt')
+        torch.save(pyg_data, pyg_file)
+        print(f"Saved PyG graph of {self.genome_str}")
+
+    def normalize_ftrs(self, pyg_data, normalize_attrs):
+        """
+        Z-score normalize specified node features
+        
+        Args:
+            pyg_data: PyG data object
+            normalize_attrs: List of attribute names to normalize
+        """
+        print("\nFeature names in order:")
+        print(self.node_attrs)
+        
+        print("\nFeature statistics before normalization:")
+        print(f"Features to normalize: {normalize_attrs}")
+        print(f"Data tensor shape: {pyg_data.x.shape}")
+        
+        # Get indices of features to normalize
+        feature_indices = [self.node_attrs.index(attr) for attr in normalize_attrs]
+        print(f"Feature indices to normalize: {feature_indices}")
+        print(f"Mean: {torch.mean(pyg_data.x, dim=0)}")
+        print(f"Std:  {torch.std(pyg_data.x, dim=0)}")
+        
+        # Z-score normalize specified features
+        for i in feature_indices:
+            if i < pyg_data.x.shape[1]:  # Check if index is valid
+                mean = torch.mean(pyg_data.x[:, i])
+                std = torch.std(pyg_data.x[:, i])
+                if std != 0:  # Avoid division by zero
+                    pyg_data.x[:, i] = (pyg_data.x[:, i] - mean) / std
+        
+        print("\nFeature statistics after normalization:")
+        print(f"Mean: {torch.mean(pyg_data.x, dim=0)}")
+        print(f"Std:  {torch.std(pyg_data.x, dim=0)}")
+        
+        return pyg_data
