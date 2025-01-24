@@ -23,13 +23,14 @@ gen_config:
   prep_decoding: False
   raft: False
 gen_steps:
-  sample_reads: True
-  create_graphs: True
-  parse_gfa: False
-  pile-o-gram: False
-  diploid_features: False
-  ground_truth: False
-  ml_graphs: False
+  sample_reads: False
+  create_graphs: False
+  parse_gfa: True
+  hic: True
+  pile-o-gram: True
+  diploid_features: True
+  ground_truth: True
+  ml_graphs: True
 nfcore_hic:
   # using dnase mode
   dnase: True
