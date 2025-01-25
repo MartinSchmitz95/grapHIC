@@ -26,53 +26,31 @@ class SwitchLoss(nn.Module):
         self.lambda_2 = lambda_2
         self.lambda_3 = lambda_3
 
-    def forward(self, y_true, y_pred, src, dst, g):
+    def forward(self, y_true, y_pred, src, dst, g, chr, multi=True):
+        if multi:
+            return self.multi_chr_forward(y_true, y_pred, src, dst, g, chr)
+        else:
+            return self.single_chr_forward(y_true, y_pred, src, dst, g, chr)
 
-        """nodes = list(range(len(y_true)))
-        shuffled_nodes = nodes.copy()
-        random.shuffle(shuffled_nodes)
-
-        src = torch.tensor(nodes, device=y_true.device)
-        dst = torch.tensor(shuffled_nodes, device=y_true.device)"""
-
-        # Initialize a list to store pairs of nodes and their neighbors
-        """nodes = list(range(len(y_true)))
-        src = torch.tensor(nodes, device=y_true.device)
-        dst = torch.tensor(nodes, device=y_true.device)
-
-        # Iterate over all nodes and get their neighbors
-
-        for i, node in enumerate(nodes):
-            neighbors = list(g.successors(node))
-            if neighbors:
-                dst[i] = random.choice(neighbors)
-            else:
-                dst[i] = node"""
-
-        # Assuming `g` is your PyG graph and `n` is the number of edges to sample
-        n = g.num_nodes  # Example number of edges to sample
-
-        # Sample `n` random edges from the graph
+    def single_chr_forward(self, y_true, y_pred, src, dst, g, chr):
+        # Sample random edges from the graph
+        n = g.num_nodes
         num_edges = g.num_edges
-        edge_ids = torch.randint(0, num_edges, (n,)).to(device)
-
-        # Get the source and destination nodes of these edges
+        edge_ids = torch.randint(0, num_edges, (n,), device=y_true.device)
+        
         src = g.edge_index[0][edge_ids]
         dst = g.edge_index[1][edge_ids]
 
-
         # Get labels and predictions for each pair
-        y_true_i = y_true[src].to(device)
-        y_true_j = y_true[dst].to(device)
-        y_pred_i = y_pred[src].to(device)
-        y_pred_j = y_pred[dst].to(device)
+        y_true_i = y_true[src]
+        y_true_j = y_true[dst]
+        y_pred_i = y_pred[src]
+        y_pred_j = y_pred[dst]
 
-        #print(y_pred_i.shape, )
         # Calculate the indicators
         indicator_same_label = (y_true_i == y_true_j).float()
         indicator_diff_label = (y_true_i != y_true_j).float()
         indicator_label_zero = (y_true == 0).float()
-
 
         # Calculate the margin
         margin = torch.abs(y_true_i - y_true_j)
@@ -80,10 +58,75 @@ class SwitchLoss(nn.Module):
         # Calculate the loss terms
         term_same_label = indicator_same_label * (y_pred_i - y_pred_j) ** 2
         term_diff_label = indicator_diff_label * torch.max(torch.zeros_like(margin),
-                                                           margin - torch.abs(y_pred_i - y_pred_j)) ** 2 * 10
+                                                       margin - torch.abs(y_pred_i - y_pred_j)) ** 2 * 10
         term_label_zero = indicator_label_zero * (y_pred ** 2)
 
         # Combine the terms with the weights
+        loss = (self.lambda_1 * term_same_label.mean() +
+                self.lambda_2 * term_diff_label.mean() +
+                self.lambda_3 * term_label_zero.mean())
+
+        return loss
+
+    def multi_chr_forward(self, y_true, y_pred, src, dst, g, chr):
+        # Get unique chromosomes
+        unique_chr = torch.unique(chr)
+        
+        all_src = []
+        all_dst = []
+        
+        # For each chromosome, sample edges between nodes of the same chromosome
+        for c in unique_chr:
+            # Create mask for current chromosome
+            chr_mask = (chr == c)
+            chr_nodes = torch.where(chr_mask)[0]
+            
+            if len(chr_nodes) < 2:
+                continue
+                
+            # Get edges where both nodes are in the current chromosome
+            edge_mask = chr[g.edge_index[0]] == c
+            edge_mask &= chr[g.edge_index[1]] == c
+            chr_edges = g.edge_index[:, edge_mask]
+            
+            if chr_edges.size(1) == 0:
+                continue
+                
+            # Sample random edges for this chromosome
+            n_samples = len(chr_nodes)
+            edge_ids = torch.randint(0, chr_edges.size(1), (n_samples,), device=y_true.device)
+            
+            all_src.append(chr_edges[0][edge_ids])
+            all_dst.append(chr_edges[1][edge_ids])
+
+        if not all_src:
+            return torch.tensor(0.0, device=y_true.device, requires_grad=True)
+
+        # Concatenate all sampled edges
+        src = torch.cat(all_src)
+        dst = torch.cat(all_dst)
+
+        # Get labels and predictions for each pair
+        y_true_i = y_true[src]
+        y_true_j = y_true[dst]
+        y_pred_i = y_pred[src]
+        y_pred_j = y_pred[dst]
+
+        # Calculate the indicators
+        indicator_same_label = (y_true_i == y_true_j).float()
+        indicator_diff_label = (y_true_i != y_true_j).float()
+        indicator_label_zero = (y_true == 0).float()
+
+        # Calculate the margin
+        margin = torch.abs(y_true_i - y_true_j)
+
+        # Calculate the loss terms
+        term_same_label = indicator_same_label * (y_pred_i - y_pred_j) ** 2
+        term_diff_label = indicator_diff_label * torch.max(torch.zeros_like(margin),
+                                                       margin - torch.abs(y_pred_i - y_pred_j)) ** 2 * 10
+        term_label_zero = indicator_label_zero * (y_pred ** 2)
+
+        # Calculate the final loss by averaging across all samples
         loss = (self.lambda_1 * term_same_label.mean() +
                 self.lambda_2 * term_diff_label.mean() +
                 self.lambda_3 * term_label_zero.mean())
@@ -97,8 +140,13 @@ class HammingLoss(nn.Module):
         self.lambda_2 = lambda_2
         self.lambda_3 = lambda_3
 
-    def forward(self, y_true, y_pred, src, dst, g):
+    def forward(self, y_true, y_pred, src, dst, chr, multi=True):
+        if multi:
+            return self.multi_chr_forward(y_true, y_pred, src, dst, chr)
+        else:
+            return self.single_chr_forward(y_true, y_pred, src, dst, chr)
 
+    def single_chr_forward(self, y_true, y_pred, src, dst, chr):
         nodes = list(range(len(y_true)))
         shuffled_nodes = nodes.copy()
         random.shuffle(shuffled_nodes)
@@ -112,12 +160,10 @@ class HammingLoss(nn.Module):
         y_pred_i = y_pred[src].to(device)
         y_pred_j = y_pred[dst].to(device)
 
-        #print(y_pred_i.shape, )
         # Calculate the indicators
         indicator_same_label = (y_true_i == y_true_j).float()
         indicator_diff_label = (y_true_i != y_true_j).float()
         indicator_label_zero = (y_true == 0).float()
-
 
         # Calculate the margin
         margin = torch.abs(y_true_i - y_true_j)
@@ -125,7 +171,7 @@ class HammingLoss(nn.Module):
         # Calculate the loss terms
         term_same_label = indicator_same_label * (y_pred_i - y_pred_j) ** 2
         term_diff_label = indicator_diff_label * torch.max(torch.zeros_like(margin),
-                                                           margin - torch.abs(y_pred_i - y_pred_j)) ** 2
+                                                       margin - torch.abs(y_pred_i - y_pred_j)) ** 2
         term_label_zero = indicator_label_zero * (y_pred ** 2)
 
         # Combine the terms with the weights
@@ -134,20 +180,77 @@ class HammingLoss(nn.Module):
                 self.lambda_3 * term_label_zero.mean())
 
         return loss
-    
-def fraction_correct_yak(y_true, y_pred):
 
+    def multi_chr_forward(self, y_true, y_pred, src, dst, chr):
+        # Get unique chromosomes and their counts
+        unique_chr, chr_counts = torch.unique(chr, return_counts=True)
+        
+        # Filter out chromosomes with less than 2 nodes
+        valid_mask = chr_counts >= 2
+        unique_chr = unique_chr[valid_mask]
+        
+        if len(unique_chr) == 0:
+            return torch.tensor(0.0, device=y_true.device, requires_grad=True)
+
+        # Create a mask tensor for all chromosomes at once
+        chr_masks = chr.unsqueeze(0) == unique_chr.unsqueeze(1)  # Broadcasting
+        
+        # Initialize tensors to store results for all chromosomes
+        all_true_i = []
+        all_true_j = []
+        all_pred_i = []
+        all_pred_j = []
+        all_zero_indicators = []
+        
+        for idx, mask in enumerate(chr_masks):
+            # Get nodes for current chromosome
+            chr_nodes = torch.where(mask)[0]
+            
+            # Create shuffled pairs within chromosome
+            shuffled_indices = torch.randperm(len(chr_nodes))
+            
+            # Gather the values using the masks
+            all_true_i.append(y_true[chr_nodes])
+            all_true_j.append(y_true[chr_nodes[shuffled_indices]])
+            all_pred_i.append(y_pred[chr_nodes])
+            all_pred_j.append(y_pred[chr_nodes[shuffled_indices]])
+            all_zero_indicators.append(y_true[mask] == 0)
+
+        # Stack all tensors
+        y_true_i = torch.cat(all_true_i)
+        y_true_j = torch.cat(all_true_j)
+        y_pred_i = torch.cat(all_pred_i)
+        y_pred_j = torch.cat(all_pred_j)
+        indicator_label_zero = torch.cat(all_zero_indicators).float()
+
+        # Calculate indicators for all pairs at once
+        indicator_same_label = (y_true_i == y_true_j).float()
+        indicator_diff_label = (y_true_i != y_true_j).float()
+
+        # Calculate margin for all pairs at once
+        margin = torch.abs(y_true_i - y_true_j)
+
+        # Calculate loss terms for all pairs at once
+        term_same_label = indicator_same_label * (y_pred_i - y_pred_j) ** 2
+        term_diff_label = indicator_diff_label * torch.max(torch.zeros_like(margin),
+                                                   margin - torch.abs(y_pred_i - y_pred_j)) ** 2
+        term_label_zero = indicator_label_zero * torch.cat([y_pred[mask] for mask in chr_masks]) ** 2
+
+        # Calculate the final loss by averaging across all samples
+        loss = (self.lambda_1 * term_same_label.mean() +
+                self.lambda_2 * term_diff_label.mean() +
+                self.lambda_3 * term_label_zero.mean())
+
+        return loss
+    
+def fraction_correct_yak(y_true, y_pred, chr):
     device = y_true.device
     y_true = y_true.to(device)
     y_pred = y_pred.to(device)
-
-    #print(y_true)
-    #print(f"y_true and y_pred {y_true.shape} {y_pred.shape}")
-
-    def calculate_fractions(label):
-        mask = (y_true == label)
-        #print(mask)
-        preds = y_pred[mask]
+    
+    def calculate_fractions(label, mask):
+        combined_mask = (y_true == label) & mask
+        preds = y_pred[combined_mask]
         if len(preds) > 0:
             sum_smaller_zero = (preds < 0).float().sum().item()
             sum_larger_zero = (preds >= 0).float().sum().item()
@@ -156,26 +259,53 @@ def fraction_correct_yak(y_true, y_pred):
             sum_larger_zero = 0.0
         return sum_smaller_zero, sum_larger_zero
 
-    # Calculate fractions for -1 and 1
-    sum_neg1_smaller_zero, sum_neg1_larger_zero = calculate_fractions(-1)
-    sum_pos1_smaller_zero, sum_pos1_larger_zero = calculate_fractions(1)
+    # Get unique chromosomes
+    unique_chr = torch.unique(chr)
+    total_correct = 0
+    total_samples = 0
 
-    print(f"fractions: {sum_neg1_smaller_zero} {sum_neg1_larger_zero} {sum_pos1_smaller_zero} {sum_pos1_larger_zero}")
-    # Evaluate both combinations
-    combination1 = (sum_neg1_smaller_zero + sum_pos1_larger_zero)
-    combination2 = (sum_neg1_larger_zero + sum_pos1_smaller_zero)
-    print(f"combinations: {combination1} {combination2}, total: {combination1 + combination2}")
+    for c in unique_chr:
+        # Create mask for current chromosome
+        chr_mask = (chr == c)
+        
+        # Skip chromosomes with no valid labels
+        if not ((y_true[chr_mask] == 1).any() or (y_true[chr_mask] == -1).any()):
+            continue
 
-    # Return the best combination
-    metric = max(combination1, combination2)/(combination1 + combination2)
-    return metric
+        # Calculate fractions for -1 and 1 for this chromosome
+        sum_neg1_smaller_zero, sum_neg1_larger_zero = calculate_fractions(-1, chr_mask)
+        sum_pos1_smaller_zero, sum_pos1_larger_zero = calculate_fractions(1, chr_mask)
+
+        print(f"Chr {c} fractions: neg<0:{sum_neg1_smaller_zero} neg>=0:{sum_neg1_larger_zero} "
+              f"pos<0:{sum_pos1_smaller_zero} pos>=0:{sum_pos1_larger_zero}")
+        
+        # Evaluate both combinations
+        combination1 = (sum_neg1_smaller_zero + sum_pos1_larger_zero)
+        combination2 = (sum_neg1_larger_zero + sum_pos1_smaller_zero)
+        chr_total = combination1 + combination2
+        
+        if chr_total > 0:  # Only include chromosomes with valid predictions
+            print(f"Chr {c} combinations: {combination1} {combination2}, total: {chr_total}")
+            chr_correct = max(combination1, combination2)
+            total_correct += chr_correct
+            total_samples += chr_total
+            print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
+
+    # Return metric based on all samples
+    if total_samples > 0:
+        final_metric = total_correct / total_samples
+        print(f"Overall metric: {total_correct}/{total_samples} = {final_metric:.3f}")
+        return final_metric
+    else:
+        print("No valid samples found")
+        return 0.0
 
 def train(model, data_path, train_selection, valid_selection, device, config, diploid=False, symmetry=False, aux=False, quick=False, dr_loss=True):
     best_valid_loss = 10000
     overfit = not bool(valid_selection)
 
     hamming_loss = HammingLoss().to(device)
-    #switch_loss = SwitchLoss().to(device)
+    switch_loss = SwitchLoss().to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=config['decay'], patience=config['patience'], verbose=True)
@@ -203,14 +333,15 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
                 src = g.edge_index[0]  # Source nodes
                 dst = g.edge_index[1]  # Destination nodes
                 y = g.y
+                chr = g.chr
                 optimizer.zero_grad()
-                loss_1 = hamming_loss(y, yak_predictions, src, dst, g)
-                #loss_2 = switch_loss(y, yak_predictions, src, dst, g)
+                loss_1 = hamming_loss(y, yak_predictions, src, dst, chr)
+                loss_2 = switch_loss(y, yak_predictions, src, dst, g, chr)
                 #print(loss_1, loss_2)
-                loss = loss_1 #+ loss_2
+                loss = loss_1 + 0.2 * loss_2
                 loss.backward()
                 train_loss.append(loss.item())
-                yak_frac_train.append(fraction_correct_yak(y, yak_predictions))
+                yak_frac_train.append(fraction_correct_yak(y, yak_predictions, chr))
                 optimizer.step()
 
                 elapsed = datetime.now() - time_start
