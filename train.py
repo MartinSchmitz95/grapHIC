@@ -33,13 +33,20 @@ class SwitchLoss(nn.Module):
             return self.single_chr_forward(y_true, y_pred, src, dst, g, chr)
 
     def single_chr_forward(self, y_true, y_pred, src, dst, g, chr):
-        # Sample random edges from the graph
+        # Filter edges of type 0 (overlap edges)
+        edge_type_mask = g.edge_type == 0
+        filtered_edge_index = g.edge_index[:, edge_type_mask]
+        
+        if filtered_edge_index.size(1) == 0:
+            return torch.tensor(0.0, device=y_true.device, requires_grad=True)
+            
+        # Sample random edges from the filtered edges
         n = g.num_nodes
-        num_edges = g.num_edges
+        num_edges = filtered_edge_index.size(1)
         edge_ids = torch.randint(0, num_edges, (n,), device=y_true.device)
         
-        src = g.edge_index[0][edge_ids]
-        dst = g.edge_index[1][edge_ids]
+        src = filtered_edge_index[0][edge_ids]
+        dst = filtered_edge_index[1][edge_ids]
 
         # Get labels and predictions for each pair
         y_true_i = y_true[src]
@@ -75,6 +82,10 @@ class SwitchLoss(nn.Module):
         all_src = []
         all_dst = []
         
+        # Filter edges of type 0 (overlap edges)
+        edge_type_mask = g.edge_type == 0
+        filtered_edge_index = g.edge_index[:, edge_type_mask]
+        
         # For each chromosome, sample edges between nodes of the same chromosome
         for c in unique_chr:
             # Create mask for current chromosome
@@ -85,9 +96,9 @@ class SwitchLoss(nn.Module):
                 continue
                 
             # Get edges where both nodes are in the current chromosome
-            edge_mask = chr[g.edge_index[0]] == c
-            edge_mask &= chr[g.edge_index[1]] == c
-            chr_edges = g.edge_index[:, edge_mask]
+            edge_mask = chr[filtered_edge_index[0]] == c
+            edge_mask &= chr[filtered_edge_index[1]] == c
+            chr_edges = filtered_edge_index[:, edge_mask]
             
             if chr_edges.size(1) == 0:
                 continue
@@ -304,7 +315,7 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
     best_valid_loss = 10000
     overfit = not bool(valid_selection)
 
-    hamming_loss = HammingLoss().to(device)
+    #hamming_loss = HammingLoss().to(device)
     switch_loss = SwitchLoss().to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
@@ -335,10 +346,10 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
                 y = g.y
                 chr = g.chr
                 optimizer.zero_grad()
-                loss_1 = hamming_loss(y, yak_predictions, src, dst, chr)
+               #loss_1 = hamming_loss(y, yak_predictions, src, dst, chr)
                 loss_2 = switch_loss(y, yak_predictions, src, dst, g, chr)
                 #print(loss_1, loss_2)
-                loss = loss_1 + 0.2 * loss_2
+                loss = loss_2
                 loss.backward()
                 train_loss.append(loss.item())
                 yak_frac_train.append(fraction_correct_yak(y, yak_predictions, chr))
