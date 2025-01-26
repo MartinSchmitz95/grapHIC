@@ -39,7 +39,8 @@ nfcore_hic:
   # relax alignment quality
   # do local alignment instead of e2e, to respect omnic reads
   # allow up to 4 alignments; should make alignment to unitigs work better
-  bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  #bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder'
   min_mapq: 5 # mapq not meaningful with --keep
 
   #split_fastq: True
@@ -58,7 +59,14 @@ nextflow: |
   profile = 'docker'
 
   process {
-      resourceLimits = [ cpus: 24, memory: 768.GB, time: 72.h ]
+      resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
+  }
+  process {
+      withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
+          cpus = 32
+          memory = 256.GB
+          time = 48.h
+      }
   }
 training:
   i002c_v04.multi_21: 100
