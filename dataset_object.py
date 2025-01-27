@@ -376,7 +376,7 @@ class HicDatasetCreator:
                          "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        subprocess.run(call, shell=True, check=False, cwd=self.root_path)
+        #subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
@@ -426,7 +426,7 @@ class HicDatasetCreator:
         export_connection_graph(
                 os.path.join(self.hic_sample_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
                 os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"),
-                self.unitig_2_node_path)
+                os.path.join(self.unitig_2_node_path, self.genome_str))
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
