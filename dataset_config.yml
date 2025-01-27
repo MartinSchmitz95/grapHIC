@@ -40,7 +40,7 @@ nfcore_hic:
   # do local alignment instead of e2e, to respect omnic reads
   # allow up to 4 alignments; should make alignment to unitigs work better
   #bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
-  bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder'
+  bwt2_opts_end2end: '--very-sensitive-local -L 30 -N 0 --score-min G,20,8 --local --reorder'
   min_mapq: 5 # mapq not meaningful with --keep
 
   #split_fastq: True
