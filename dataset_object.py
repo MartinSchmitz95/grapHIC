@@ -366,7 +366,7 @@ class HicDatasetCreator:
         call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path,
                         "-c", nf_conf,
                         "-params-file", nf_params, "--input", samplesheet,
-                         "-o", self.hic_path, "-w", self.tmp_path, "-profile docker"])
+                         "--outdir", self.hic_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
         subprocess.run(call, shell=True, check=False, cwd=self.root_path)
