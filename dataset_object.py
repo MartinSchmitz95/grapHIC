@@ -40,7 +40,6 @@ class HicDatasetCreator:
         self.raft_path = self.paths['raft_path']
         self.pbsim_path = self.paths['pbsim_path']
         self.nextflow_call = self.paths['nextflow_path']
-        self.hic_pipeline_path = self.paths['hic_pipeline_path']
         self.sample_profile = self.paths['sample_profile']
         self.depth = gen_config['depth']
         self.diploid = gen_config['diploid']
@@ -62,7 +61,8 @@ class HicDatasetCreator:
         self.utg_2_reads_path = os.path.join(dataset_path, "utg_2_reads")
 
         # HiC stuff
-        self.hic_path = os.path.join(dataset_path, "hic")
+        self.hic_pipeline_path = self.paths['hic_pipeline_path']
+        self.hic_root_path = os.path.join(dataset_path, "hic")
         self.hic_readsfiles_pairs = self.paths['hic_readsfiles_pairs']
 
         self.nx_graphs_path = os.path.join(dataset_path, "nx_graphs")
@@ -77,7 +77,7 @@ class HicDatasetCreator:
         self.edge_info = {}
 
         for folder in [self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
-                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path, self.hic_path,
+                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path, self.hic_root_path,
                        self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -359,6 +359,13 @@ class HicDatasetCreator:
         # set fasta param to what the filename out is
         self.nfcore_hic["fasta"] = fasta_unitig_file
 
+        # create subfolder for sample in hic dir
+        self.hic_sample_path = os.path.join(self.hic_root_path, self.genome_str)
+        if not os.path.exists(self.hic_sample_path):
+            if not os.path.exists(self.hic_sample_path):
+                os.makedirs(self.hic_sample_path)
+
+
         nf_conf = self._write_nf_config()
         nf_params = self._write_nf_params()
         samplesheet = self._write_samplesheet()
@@ -366,7 +373,7 @@ class HicDatasetCreator:
         call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path,
                         "-c", nf_conf,
                         "-params-file", nf_params, "--input", samplesheet,
-                         "--outdir", self.hic_path, "-w", self.tmp_path, "-profile docker"])
+                         "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
         subprocess.run(call, shell=True, check=False, cwd=self.root_path)
@@ -376,7 +383,7 @@ class HicDatasetCreator:
         Writes the nextflow config file for nf-core/hic to a file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        path = os.path.join(self.hic_path, filename)
+        path = os.path.join(self.hic_sample_path, filename)
         with open(path, 'wt') as f:
             # nf config is stored as a text blurb in the yml, can just write directly
             f.write(self.nextflow_config)
@@ -388,7 +395,7 @@ class HicDatasetCreator:
         Writes the parameters for nf-core/hic to a yml file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        path = os.path.join(self.hic_path, filename)
+        path = os.path.join(self.hic_sample_path, filename)
 
         with open(path, 'wt') as f:
             yaml.safe_dump(self.nfcore_hic, f)
@@ -401,7 +408,7 @@ class HicDatasetCreator:
         Multiple hic runs may be used per sample. They are written as individual lines to the sample sheet under the same sample name, and will be merged by nf-core/hic.
         Allows all configuration to stay in dataset_config.yml.
         """
-        path = os.path.join(self.hic_path, filename)
+        path = os.path.join(self.hic_sample_path, filename)
 
         with open(path, 'wt') as f:
             f.write("sample,fastq_1,fastq_2\n")
@@ -417,13 +424,13 @@ class HicDatasetCreator:
         from descongelador import export_connection_graph
 
         export_connection_graph(
-                os.path.join(self.hic_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
-                os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle"),
+                os.path.join(self.hic_sample_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
+                os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"),
                 self.unitig_2_node_path)
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
-        with open(os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
+        with open(os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
             ret = pickle.load(f)
         return ret
 
