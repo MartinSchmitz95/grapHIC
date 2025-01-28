@@ -26,8 +26,9 @@ class HicDatasetCreator:
         #self.full_dataset, self.val_dataset, self.train_dataset = utils.create_dataset_dicts(data_config=data_config)
         self.paths = config['paths']
         gen_config = config['gen_config']
-        nfcore_hic_config = config['nfcore_hic']
-        nextflow_config = config['nextflow']
+
+        self.nfcore_hic = config['nfcore_hic']
+        self.nextflow_config = config['nextflow']
         self.genome_str = ""
         self.genome = "hg002"
         self.sample_name = self.genome # not sure if should always be the same
@@ -39,7 +40,6 @@ class HicDatasetCreator:
         self.raft_path = self.paths['raft_path']
         self.pbsim_path = self.paths['pbsim_path']
         self.nextflow_call = self.paths['nextflow_path']
-        self.hic_pipeline_path = self.paths['hic_pipeline_path']
         self.sample_profile = self.paths['sample_profile']
         self.depth = gen_config['depth']
         self.diploid = gen_config['diploid']
@@ -61,13 +61,14 @@ class HicDatasetCreator:
         self.utg_2_reads_path = os.path.join(dataset_path, "utg_2_reads")
 
         # HiC stuff
-        self.hic_path = os.path.join(dataset_path, "hic")
+        self.hic_pipeline_path = self.paths['hic_pipeline_path']
+        self.hic_root_path = os.path.join(dataset_path, "hic")
         self.hic_readsfiles_pairs = self.paths['hic_readsfiles_pairs']
 
         self.nx_graphs_path = os.path.join(dataset_path, "nx_graphs")
         self.pyg_graphs_path = os.path.join(dataset_path, "pyg_graphs")
         self.utg_to_read_path = os.path.join(dataset_path, "utg_2_reads")
-        self.unitig_to_node_path = os.path.join(dataset_path, "unitig_2_node")
+        self.unitig_2_node_path = os.path.join(dataset_path, "unitig_2_node")
         self.hic_graphs_path = os.path.join(dataset_path, "hic_graphs")
         self.merged_graphs_path = os.path.join(dataset_path, "merged_graphs")
 
@@ -76,8 +77,8 @@ class HicDatasetCreator:
         self.edge_info = {}
 
         for folder in [self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
-                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path,
-                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_to_node_path]:
+                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path, self.hic_root_path,
+                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
@@ -349,10 +350,21 @@ class HicDatasetCreator:
         """
         Runs nf-core/hic on the HiC reads provided in the data config on the unitigs fasta.
         This finds chromosomal contacts between different unitigs on the same chromosome/haplotype.
-        TODO specify config for pipeline from here or as separate config ymls?
         """
+        fasta_unitig_file = f"{self.fasta_unitig_path}/{self.genome_str}.fasta"
+        # for now nf-core/hic does not support compressed input, decompress it 
+        #TODO make PR
+        if not os.path.exists(fasta_unitig_file):
+            subprocess.run(f"gunzip -k {fasta_unitig_file}.gz", shell=True, check=True)
         # set fasta param to what the filename out is
-        self.nfcore_hic_config["fasta"] = self.fasta_unitig_path
+        self.nfcore_hic["fasta"] = fasta_unitig_file
+
+        # create subfolder for sample in hic dir
+        self.hic_sample_path = os.path.join(self.hic_root_path, self.genome_str)
+        if not os.path.exists(self.hic_sample_path):
+            if not os.path.exists(self.hic_sample_path):
+                os.makedirs(self.hic_sample_path)
+
 
         nf_conf = self._write_nf_config()
         nf_params = self._write_nf_params()
@@ -360,31 +372,35 @@ class HicDatasetCreator:
 
         call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path,
                         "-c", nf_conf,
-                        "-params-file", nf_params, "-i", samplesheet,
-                         "-o", self.hic_path, "-work", self.tmp_path, "-profile docker"])
+                        "-params-file", nf_params, "--input", samplesheet,
+                         "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        subprocess.run(call, shell=True, cwd=self.dataset_path)
+        #subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
         Writes the nextflow config file for nf-core/hic to a file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+        path = os.path.join(self.hic_sample_path, filename)
+        with open(path, 'wt') as f:
             # nf config is stored as a text blurb in the yml, can just write directly
             f.write(self.nextflow_config)
 
-        return filename
+        return path
 
     def _write_nf_params(self, filename="params.yml") -> os.PathLike:
         """
         Writes the parameters for nf-core/hic to a yml file.
         Allows all configuration to stay in dataset_config.yml.
         """
-        with open(os.path.join(self.hic_path, filename), 'wt') as f:
-            yml.safe_dump(self.nfcore_hic_config)
-        return filename
+        path = os.path.join(self.hic_sample_path, filename)
+
+        with open(path, 'wt') as f:
+            yaml.safe_dump(self.nfcore_hic, f)
+
+        return path
 
     def _write_samplesheet(self, filename="samplesheet.csv") -> os.PathLike:
         """
@@ -392,10 +408,13 @@ class HicDatasetCreator:
         Multiple hic runs may be used per sample. They are written as individual lines to the sample sheet under the same sample name, and will be merged by nf-core/hic.
         Allows all configuration to stay in dataset_config.yml.
         """
-        with open(os.path.join(self.hic_path, filename), 'wt') as f:
+        path = os.path.join(self.hic_sample_path, filename)
+
+        with open(path, 'wt') as f:
             f.write("sample,fastq_1,fastq_2\n")
-            f.writelines([','.join([self.sample_name, f_pair[0], f_pair[1]]) for f_pair in self.hic_readsfiles_pairs])
-        return filename
+            f.writelines([','.join([self.sample_name, f_pair[0], f_pair[1]]) + '\n' for f_pair in self.hic_readsfiles_pairs])
+
+        return path
 
     def make_hic_edges(self):
         """
@@ -405,16 +424,20 @@ class HicDatasetCreator:
         from descongelador import export_connection_graph
 
         export_connection_graph(
-                os.path.join(self.hic_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
-                os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle"),
-                self.utg_to_read_path,
-                self.read_to_node_path)
+                os.path.join(self.hic_sample_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
+                os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"),
+                os.path.join(self.unitig_2_node_path, self.genome_str + '.pkl'))
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
-        with open(os.path.join(self.hic_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
+        with open(os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
             ret = pickle.load(f)
         return ret
+
+    def merge_graphs(self, nx_graph, hic_graph):
+        nx.set_edge_attributes(hic_graph, "hic", "type")
+        nx.set_edge_attributes(nx_graph, "overlap", "type")
+        return nx.compose(nx.MultiGraph(nx_graph), nx.MultiGraph(hic_graph))
 
     def parse_gfa(self):
         nx_graph, read_seqs, unitig_2_node, utg_2_reads = self.only_from_gfa()
@@ -692,8 +715,8 @@ class HicDatasetCreator:
         variant = nx.get_node_attributes(nx_graph, 'read_variant')
         chr = nx.get_node_attributes(nx_graph, 'read_chr')
         print(strand)
-        
         exit()
+
     def create_pog_features(self, nx_graph):
         """
         Create pog_median, pog_min, and pog_max features for each node and edge based on pile o gram data

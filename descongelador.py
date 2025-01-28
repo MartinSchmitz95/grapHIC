@@ -5,6 +5,10 @@ import tempfile
 import math
 import itertools
 
+# benchmarking imports
+import datetime
+#from tqdm import tqdm
+
 from typing import Tuple, Dict, Callable
 
 import numpy as np
@@ -34,7 +38,8 @@ def aggr_chrs(in_path: str) -> Cooler:
     # cooler requires a URI on the filesystem, so use a tmpfile
     tmp = tempfile.NamedTemporaryFile().name
 
-    factor = np.ceil(max(cooler.chromsizes)/c.binsize) + 2 # +2 to be on the safe side
+    c = Cooler(in_path)
+    factor = np.ceil(max(c.chromsizes)/c.binsize) + 2 # +2 to be on the safe side
     cooler.coarsen_cooler(in_path, tmp, sys.maxsize, factor)
 
     return Cooler(tmp)
@@ -83,29 +88,33 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
     # maybe try again if too slow
     # maybe do twice & merge the multigraphs to handle complement IDs
 
-    # init the graph with all nodes
-    ret = nx.MultiGraph()
-    ret.add_nodes_from(range(len(in_cooler.chromnames*2)))#range(max_node_id))
-
-    mat = in_cooler.matrix(balance=balance)
-    # helper lambda to generate full pairwise edges between uncomplemented and complemented node ids
-    full_pairwise = lambda idtup1, idtup2, val: [
-            (idtup1[0], idtup2[0], val),
-            (idtup1[0], idtup2[1], val),
-            (idtup1[1], idtup2[0], val),
-            (idtup1[1], idtup2[1], val),
-            ]
-    # iterate through every two distinct nodes once
-    ret.add_weighted_edges_from(
-            # value needs to be coerced to single float
-            itertools.chain.from_iterable( # apparently the standard way to flatMap in python
-                                          full_pairwise(get_idtup(i_lab), get_idtup(j_lab), float(mat[i, j][:]))
-                                          for j, j_lab in enumerate(in_cooler.chromnames)
-                                          for i, i_lab in enumerate(in_cooler.chromnames)
-                                          if j > i # will not generate self-edges
-                                          #if i != j # will not generate self-edges
-                                          ))
+    # balance and turn into matrix hic contacs
+    start = datetime.datetime.now()
+    print("Starting Graph export", start)
+    mat = in_cooler.matrix(balance=balance)[:]
+    print("Finished balancing in", datetime.datetime.now() - start)
+    ret = nx.from_numpy_array(mat)
+    print("read into networkx in", datetime.datetime.now() - start)
+    nx.relabel_nodes(ret, {ind:get_idtup(utig)[0] for ind, utig in enumerate(in_cooler.chromnames)})
+    print("Adjusted labels to graph nodes in", datetime.datetime.now() - start)
     return ret
+
+    ## init the graph with all nodes
+    #ret = nx.MultiGraph()
+    #ret.add_nodes_from(range(len(utigs)*2))#range(max_node_id))
+    ## iterate through every two distinct nodes once
+    #for i, j, w in tqdm(np.argwhere(mat)):
+    #    if i > j: # will not generate self-edges
+    #        continue
+    #    print(i, j, w)
+    #    i_tup = get_idtup(utigs[i])
+    #    j_tup = get_idtup(utigs[j])
+
+    #    # generate full pairwise edges
+    #    ret.add_edge(i_tup[0], j_tup[0], weight=w)
+    #    ret.add_edge(i_tup[0], j_tup[1], weight=w)
+    #    ret.add_edge(i_tup[1], j_tup[0], weight=w)
+    #    ret.add_edge(i_tup[1], j_tup[1], weight=w)
 
 def load_pickle(filepath) -> Dict:
     ret = None
@@ -128,14 +137,16 @@ def export_image(intuple, path, scale=id):
     """
     plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
-def export_connection_graph(infile, outfile, unitig_dict, read_dict):
+def export_connection_graph(infile, outfile, unitig_dict):
     print("aggregating cooler")
     c = aggr_chrs(infile)
-    print("loading contig dict")
+
+    print("loading unitig dict")
     unitig_dict = load_pickle(unitig_dict)
-    read_dict = load_pickle(read_dict)
+
     print("constructing graph")
-    graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
+    graph = to_graph(c, lambda x: unitig_dict[x])
+
     print("saving graph")
     save_pickle(graph, outfile)
 
@@ -144,22 +155,22 @@ def main(args):
     infile = args[1]
     outfile = args[2]
     unitig_dict = load_pickle(args[3])
-    read_dict = load_pickle(args[4])
 
     c = aggr_chrs(infile)
 
     np_tup = to_np_matrix(c)
 
-    #print(np_tup)
+    print("saving matrix to pickle")
+    save_pickle(np_tup[1], outfile + '.np.pickle')
 
     #print("saving NP matrix")
     #save_np_matrix(np_tup, outfile + '.tsv')
 
     print("converting to MultiGraph")
-    graph = to_graph(c, lambda x: read_dict[unitig_dict[x][0]])
+    graph = to_graph(c, lambda x: unitig_dict[x])
 
     print("saving MultiGraph")
-    save_pickle(c, outfile + '.nx.pickle')
+    save_pickle(graph, outfile + '.nx.pickle')
 
     print("plotting image")
     export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
