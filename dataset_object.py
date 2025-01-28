@@ -435,8 +435,8 @@ class HicDatasetCreator:
         return ret
 
     def merge_graphs(self, nx_graph, hic_graph):
-        nx.set_edge_attributes(hic_graph, ["type"], "hic")
-        nx.set_edge_attributes(nx_graph, ["type"], "overlap")
+        nx.set_edge_attributes(hic_graph, "hic", "type")
+        nx.set_edge_attributes(nx_graph, "overlap", "type")
         return nx.compose(nx.MultiGraph(nx_graph), nx.MultiGraph(hic_graph))
 
     def parse_gfa(self):
