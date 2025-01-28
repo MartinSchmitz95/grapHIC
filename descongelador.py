@@ -5,6 +5,10 @@ import tempfile
 import math
 import itertools
 
+# benchmarking imports
+import datetime
+from tqdm import tqdm
+
 from typing import Tuple, Dict, Callable
 
 import numpy as np
@@ -85,17 +89,25 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
     # maybe do twice & merge the multigraphs to handle complement IDs
 
     # balance and turn into matrix hic contacs
+    print("Starting Balancing", datetime.datetime.now())
     mat = in_cooler.matrix(balance=balance)
+    start = datetime.datetime.now()
+    print("Starting Graph export", start)
 
     # init the graph with all nodes
     ret = nx.MultiGraph()
-    ret.add_nodes_from(range(len(in_cooler.chromnames*2)))#range(max_node_id))
+    utigs = list(in_cooler.chromnames)
+    ret.add_nodes_from(range(len(utigs)*2))#range(max_node_id))
+
+    print("Graph initialised in", datetime.datetime.now() - start)
+
     # iterate through every two distinct nodes once
-    for i, j, w in np.argwhere(mat):
+    for i, j, w in tqdm(np.argwhere(mat)):
         if i > j: # will not generate self-edges
             continue
-        i_tup = get_idtup(in_cooler.chromnames[i])
-        j_tup = get_idtup(in_cooler.chromnames[j])
+        print(i, j, w)
+        i_tup = get_idtup(utigs[i])
+        j_tup = get_idtup(utigs[j])
 
         # generate full pairwise edges
         ret.add_edge(i_tup[0], j_tup[0], weight=w)
@@ -103,6 +115,7 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
         ret.add_edge(i_tup[1], j_tup[0], weight=w)
         ret.add_edge(i_tup[1], j_tup[1], weight=w)
 
+    print("Graph populated in", datetime.datetime.now() - start)
     return ret
 
 def load_pickle(filepath) -> Dict:
