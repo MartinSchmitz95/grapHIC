@@ -426,7 +426,7 @@ class HicDatasetCreator:
         export_connection_graph(
                 os.path.join(self.hic_sample_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
                 os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"),
-                os.path.join(self.unitig_2_node_path, self.genome_str))
+                os.path.join(self.unitig_2_node_path, self.genome_str + '.pkl'))
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
