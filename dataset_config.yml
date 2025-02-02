@@ -63,9 +63,9 @@ nextflow: |
   }
   process {
       withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
-          cpus = 32
+          cpus = 20
           memory = 256.GB
-          time = 48.h
+          time = 5.d
       }
   }
 training:
