@@ -59,9 +59,10 @@ class HicDatasetCreator:
         self.fasta_raw_path = os.path.join(dataset_path, "fasta_raw")
         self.gfa_raw_path = os.path.join(dataset_path, "gfa_raw")
         self.overlaps_path = os.path.join(dataset_path, "overlaps")
-        self.pile_o_grams_path = os.path.join(dataset_path, "pile_o_grams")
+        #self.pile_o_grams_path = os.path.join(dataset_path, "pile_o_grams")
         self.utg_2_reads_path = os.path.join(dataset_path, "utg_2_reads")
         self.jellyfish_path = os.path.join(dataset_path, "jellyfish")
+
         # HiC stuff
         self.hic_pipeline_path = self.paths['hic_pipeline_path']
         self.hic_root_path = os.path.join(dataset_path, "hic")
@@ -80,7 +81,7 @@ class HicDatasetCreator:
         self.edge_info = {}
 
         for folder in [self.coverage_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
-                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path,
+                       self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path,
                        self.hic_graphs_path, self.merged_graphs_path, self.unitig_to_node_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -287,40 +288,6 @@ class HicDatasetCreator:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
     
-    def run_raft(self):
-        reads_file = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
-        raft_depth = 2 * self.depth
-
-        #overlaps_file = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf.gz")
-
-        subprocess.run(f'./hifiasm --dbg-ovec -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {reads_file}', shell=True, cwd=self.hifiasm_path)
-        #subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
-
-        # Merge cis and trans overlaps
-        cis_paf = f"{self.hifiasm_dump}/tmp_asm.0.ovlp.paf"
-        trans_paf = f"{self.hifiasm_dump}/tmp_asm.1.ovlp.paf"
-        merged_paf = os.path.join(self.overlaps_path, f"{self.genome_str}_ov.paf")  
-        cis_paf_path = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf")
-        with gzip.open(merged_paf + '.gz', 'wt') as outfile:
-            for paf_file in [cis_paf, trans_paf]:
-                if os.path.exists(paf_file):
-                    with open(paf_file, 'r') as infile:
-                        outfile.write(infile.read())
-        print(f"Merged overlaps saved to: {merged_paf}.gz")
-        # Move and compress cis_paf
-        with gzip.open(cis_paf_path + '.gz', 'wt') as outfile:
-            with open(cis_paf, 'r') as infile:
-                outfile.write(infile.read())
-        print(f"Cis overlaps saved to: {cis_paf_path}.gz")
-
-        # Step 2: Run RAFT to create pil-o-gram
-        frag_prefix = os.path.join(self.tmp_path, 'raft_out')
-        pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 1000000 {reads_file} {merged_paf}.gz", shell=True, check=True)
-        shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
-        # Gzip the fragmented reads file
-        subprocess.run(f"gzip -f {frag_prefix}.reads.fasta", shell=True, check=True)
-
     def create_graphs(self):
         if self.real:
             full_fasta = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
@@ -722,93 +689,6 @@ class HicDatasetCreator:
         print(strand)
         exit()
 
-    def create_pog_features(self, nx_graph):
-        """
-        Create pog_median, pog_min, and pog_max features for each node and edge based on pile o gram data
-        from both full and cis coverage files
-        """
-        # Load the pile o gram files
-        pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-
-        # Load the read_to_node_id mapping
-        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
-        with open(read_to_node_path, 'rb') as f:
-            read_to_node = pickle.load(f)
-
-        # Initialize all nodes with default values of 1
-        pog_median = {node: 1 for node in nx_graph.nodes()}
-        pog_min = {node: 1 for node in nx_graph.nodes()}
-        pog_max = {node: 1 for node in nx_graph.nodes()}
-
-        # Store coverage data for each read
-        read_coverages = {}
-        fasta_path = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
-
-        # Load FASTA IDs in order
-        fasta_ids = []
-        with gzip.open(fasta_path, 'rt') as f:
-            for record in SeqIO.parse(f, 'fasta'):
-                fasta_ids.append(record.id)
-        
-        # Count reads in pile-o-gram file
-        pog_count = 0
-        with open(pog_file, 'r') as f:
-            for line in f:
-                if line.startswith('read'):
-                    pog_count += 1
-                    
-        print(f"\nNumber of reads in fasta file: {len(fasta_ids)}")
-        print(f"Number of reads in pile-o-gram file: {pog_count}")
-        if len(fasta_ids) != pog_count:
-            print("Warning: Mismatch between number of reads in fasta and pile-o-gram files")
-            exit()
-        
-        # Process full coverage file
-        pog_line_count = 0
-        with open(pog_file, 'r') as f:
-            for line in f:
-                if line.startswith('read'):
-                    parts = line.strip().split()
-                    # Use FASTA ID instead of POG file ID
-                    read_id = fasta_ids[pog_line_count]
-                    coverages = [int(part.split(',')[1]) for part in parts[2:] if ',' in part]
-                    read_coverages[read_id] = coverages
-                    if read_id in read_to_node:
-                        node_ids = read_to_node[read_id]
-                        median = np.median(coverages)
-                        min_val = np.min(coverages)
-                        max_val = np.max(coverages)
-                        for node_id in node_ids:
-                            pog_median[node_id] = median / self.depth
-                            pog_min[node_id] = min_val / self.depth
-                            pog_max[node_id] = max_val / self.depth
-                    else:
-                        print(f"Read {read_id} not found in read_to_node mapping")
-                        exit()
-                    pog_line_count += 1
-
-        # Calculate statistics for pog_median
-        """median_values = list(pog_median.values())
-        print("\nPile-o-gram median statistics:")
-        print(f"Mean: {np.mean(median_values):.3f}")
-        print(f"Std: {np.std(median_values):.3f}")
-        print(f"Min: {np.min(median_values):.3f}")
-        print(f"Max: {np.max(median_values):.3f}")
-        print(f"25th percentile: {np.percentile(median_values, 25):.3f}")
-        print(f"50th percentile: {np.percentile(median_values, 50):.3f}")
-        print(f"75th percentile: {np.percentile(median_values, 75):.3f}")
-        exit()"""
-        
-        nx.set_node_attributes(nx_graph, pog_median, 'pog_median')
-        nx.set_node_attributes(nx_graph, pog_min, 'pog_min')
-        nx.set_node_attributes(nx_graph, pog_max, 'pog_max')
-        
-        # Add capped version of pog_median
-        pog_median_capped = {node: min(3, value) for node, value in pog_median.items()}
-        nx.set_node_attributes(nx_graph, pog_median_capped, 'pog_median_capped')
-        
-        print(f"Added pile-o-gram features to {len(pog_median)} nodes.")
-
     def create_hh_features(self, nx_graph):
         """
         load reads. check starting position of read and compare with variant_starts list.
@@ -1115,75 +995,6 @@ class HicDatasetCreator:
             variant_ends.append(row['POS'] + variant_length - 1)  # Adjusted to calculate the end position accurately
         print(len(variant_starts), len(variant_ends))
         return variant_starts, variant_ends
-
-    def calculate_coverage_statistics(self, nx_graph):
-        """
-        Calculate extended coverage statistics for each node
-        Returns dict of feature dictionaries
-        """
-        features = {
-            'coverage_std': {},
-            'coverage_skew': {},
-            'coverage_kurtosis': {},
-            'coverage_q1': {},
-            'coverage_q3': {},
-            'coverage_iqr': {},
-            'coverage_cv': {},  # coefficient of variation
-            'coverage_peaks': {},
-            'coverage_density': {}
-        }
-        
-        # Load coverage data
-        pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
-        
-        with open(read_to_node_path, 'rb') as f:
-            read_to_node = pickle.load(f)
-        
-        # Process coverage file
-        with open(pog_file, 'r') as f:
-            for line in f:
-                if line.startswith('read'):
-                    parts = line.strip().split()
-                    read_id = parts[1]
-                    coverages = np.array([int(part.split(',')[1]) for part in parts[2:] if ',' in part])
-                    
-                    if read_id in read_to_node:
-                        node_ids = read_to_node[read_id]
-                        
-                        # Calculate statistics
-                        std = np.std(coverages)
-                        skew = scipy.stats.skew(coverages)
-                        kurt = scipy.stats.kurtosis(coverages)
-                        q1, q3 = np.percentile(coverages, [25, 75])
-                        iqr = q3 - q1
-                        cv = std / np.mean(coverages) if np.mean(coverages) != 0 else 0
-                        
-                        # Count peaks (local maxima)
-                        peaks = len(scipy.signal.find_peaks(coverages)[0])
-                        
-                        # Calculate coverage density (% positions above mean)
-                        density = np.mean(coverages > np.mean(coverages))
-                        
-                        # Assign to all associated nodes
-                        for node_id in node_ids:
-                            features['coverage_std'][node_id] = std / self.depth
-                            features['coverage_skew'][node_id] = skew
-                            features['coverage_kurtosis'][node_id] = kurt
-                            features['coverage_q1'][node_id] = q1 / self.depth
-                            features['coverage_q3'][node_id] = q3 / self.depth
-                            features['coverage_iqr'][node_id] = iqr / self.depth
-                            features['coverage_cv'][node_id] = cv
-                            features['coverage_peaks'][node_id] = peaks
-                            features['coverage_density'][node_id] = density
-        
-        # Set default values for nodes without coverage data
-        for node in nx_graph.nodes():
-            for feat_dict in features.values():
-                if node not in feat_dict:
-                    feat_dict[node] = 0.0
-                
-        return features
 
     def calculate_sequence_features(self, nx_graph):
         """
@@ -1715,3 +1526,203 @@ class HicDatasetCreator:
         except subprocess.CalledProcessError as e:
             print(f"Error running pileup.sh: {e}")
             raise
+
+#################################################
+####### Welcome to the Code Graveyard X.X #######
+#################################################
+
+
+"""
+    def run_raft(self):
+        reads_file = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
+        raft_depth = 2 * self.depth
+
+        #overlaps_file = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf.gz")
+
+        subprocess.run(f'./hifiasm --dbg-ovec -r3 -o {self.hifiasm_dump}/tmp_asm -t{self.threads} {reads_file}', shell=True, cwd=self.hifiasm_path)
+        #subprocess.run(f'mv {self.hifiasm_dump}/tmp_asm.bp.r_utg.gfa {gfa_unitig_output}', shell=True, cwd=self.hifiasm_path)
+
+        # Merge cis and trans overlaps
+        cis_paf = f"{self.hifiasm_dump}/tmp_asm.0.ovlp.paf"
+        trans_paf = f"{self.hifiasm_dump}/tmp_asm.1.ovlp.paf"
+        merged_paf = os.path.join(self.overlaps_path, f"{self.genome_str}_ov.paf")  
+        cis_paf_path = os.path.join(self.overlaps_path, f"{self.genome_str}_cis.paf")
+        with gzip.open(merged_paf + '.gz', 'wt') as outfile:
+            for paf_file in [cis_paf, trans_paf]:
+                if os.path.exists(paf_file):
+                    with open(paf_file, 'r') as infile:
+                        outfile.write(infile.read())
+        print(f"Merged overlaps saved to: {merged_paf}.gz")
+        # Move and compress cis_paf
+        with gzip.open(cis_paf_path + '.gz', 'wt') as outfile:
+            with open(cis_paf, 'r') as infile:
+                outfile.write(infile.read())
+        print(f"Cis overlaps saved to: {cis_paf_path}.gz")
+
+        # Step 2: Run RAFT to create pil-o-gram
+        frag_prefix = os.path.join(self.tmp_path, 'raft_out')
+        pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 1000000 {reads_file} {merged_paf}.gz", shell=True, check=True)
+        shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
+        # Gzip the fragmented reads file
+        subprocess.run(f"gzip -f {frag_prefix}.reads.fasta", shell=True, check=True)
+
+
+
+    def create_pog_features(self, nx_graph):
+        " " "
+        Create pog_median, pog_min, and pog_max features for each node and edge based on pile o gram data
+        from both full and cis coverage files
+        " " "
+        # Load the pile o gram files
+        pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+
+        # Load the read_to_node_id mapping
+        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        with open(read_to_node_path, 'rb') as f:
+            read_to_node = pickle.load(f)
+
+        # Initialize all nodes with default values of 1
+        pog_median = {node: 1 for node in nx_graph.nodes()}
+        pog_min = {node: 1 for node in nx_graph.nodes()}
+        pog_max = {node: 1 for node in nx_graph.nodes()}
+
+        # Store coverage data for each read
+        read_coverages = {}
+        fasta_path = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
+
+        # Load FASTA IDs in order
+        fasta_ids = []
+        with gzip.open(fasta_path, 'rt') as f:
+            for record in SeqIO.parse(f, 'fasta'):
+                fasta_ids.append(record.id)
+        
+        # Count reads in pile-o-gram file
+        pog_count = 0
+        with open(pog_file, 'r') as f:
+            for line in f:
+                if line.startswith('read'):
+                    pog_count += 1
+                    
+        print(f"\nNumber of reads in fasta file: {len(fasta_ids)}")
+        print(f"Number of reads in pile-o-gram file: {pog_count}")
+        if len(fasta_ids) != pog_count:
+            print("Warning: Mismatch between number of reads in fasta and pile-o-gram files")
+            exit()
+        
+        # Process full coverage file
+        pog_line_count = 0
+        with open(pog_file, 'r') as f:
+            for line in f:
+                if line.startswith('read'):
+                    parts = line.strip().split()
+                    # Use FASTA ID instead of POG file ID
+                    read_id = fasta_ids[pog_line_count]
+                    coverages = [int(part.split(',')[1]) for part in parts[2:] if ',' in part]
+                    read_coverages[read_id] = coverages
+                    if read_id in read_to_node:
+                        node_ids = read_to_node[read_id]
+                        median = np.median(coverages)
+                        min_val = np.min(coverages)
+                        max_val = np.max(coverages)
+                        for node_id in node_ids:
+                            pog_median[node_id] = median / self.depth
+                            pog_min[node_id] = min_val / self.depth
+                            pog_max[node_id] = max_val / self.depth
+                    else:
+                        print(f"Read {read_id} not found in read_to_node mapping")
+                        exit()
+                    pog_line_count += 1
+
+        # Calculate statistics for pog_median
+        " " "median_values = list(pog_median.values())
+        print("\nPile-o-gram median statistics:")
+        print(f"Mean: {np.mean(median_values):.3f}")
+        print(f"Std: {np.std(median_values):.3f}")
+        print(f"Min: {np.min(median_values):.3f}")
+        print(f"Max: {np.max(median_values):.3f}")
+        print(f"25th percentile: {np.percentile(median_values, 25):.3f}")
+        print(f"50th percentile: {np.percentile(median_values, 50):.3f}")
+        print(f"75th percentile: {np.percentile(median_values, 75):.3f}")
+        exit()" " "
+        
+        nx.set_node_attributes(nx_graph, pog_median, 'pog_median')
+        nx.set_node_attributes(nx_graph, pog_min, 'pog_min')
+        nx.set_node_attributes(nx_graph, pog_max, 'pog_max')
+        
+        # Add capped version of pog_median
+        pog_median_capped = {node: min(3, value) for node, value in pog_median.items()}
+        nx.set_node_attributes(nx_graph, pog_median_capped, 'pog_median_capped')
+        
+        print(f"Added pile-o-gram features to {len(pog_median)} nodes.")
+
+    def calculate_coverage_statistics(self, nx_graph):
+        " " "
+        Calculate extended coverage statistics for each node
+        Returns dict of feature dictionaries
+        " " "
+        features = {
+            'coverage_std': {},
+            'coverage_skew': {},
+            'coverage_kurtosis': {},
+            'coverage_q1': {},
+            'coverage_q3': {},
+            'coverage_iqr': {},
+            'coverage_cv': {},  # coefficient of variation
+            'coverage_peaks': {},
+            'coverage_density': {}
+        }
+        
+        # Load coverage data
+        pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        
+        with open(read_to_node_path, 'rb') as f:
+            read_to_node = pickle.load(f)
+        
+        # Process coverage file
+        with open(pog_file, 'r') as f:
+            for line in f:
+                if line.startswith('read'):
+                    parts = line.strip().split()
+                    read_id = parts[1]
+                    coverages = np.array([int(part.split(',')[1]) for part in parts[2:] if ',' in part])
+                    
+                    if read_id in read_to_node:
+                        node_ids = read_to_node[read_id]
+                        
+                        # Calculate statistics
+                        std = np.std(coverages)
+                        skew = scipy.stats.skew(coverages)
+                        kurt = scipy.stats.kurtosis(coverages)
+                        q1, q3 = np.percentile(coverages, [25, 75])
+                        iqr = q3 - q1
+                        cv = std / np.mean(coverages) if np.mean(coverages) != 0 else 0
+                        
+                        # Count peaks (local maxima)
+                        peaks = len(scipy.signal.find_peaks(coverages)[0])
+                        
+                        # Calculate coverage density (% positions above mean)
+                        density = np.mean(coverages > np.mean(coverages))
+                        
+                        # Assign to all associated nodes
+                        for node_id in node_ids:
+                            features['coverage_std'][node_id] = std / self.depth
+                            features['coverage_skew'][node_id] = skew
+                            features['coverage_kurtosis'][node_id] = kurt
+                            features['coverage_q1'][node_id] = q1 / self.depth
+                            features['coverage_q3'][node_id] = q3 / self.depth
+                            features['coverage_iqr'][node_id] = iqr / self.depth
+                            features['coverage_cv'][node_id] = cv
+                            features['coverage_peaks'][node_id] = peaks
+                            features['coverage_density'][node_id] = density
+        
+        # Set default values for nodes without coverage data
+        for node in nx_graph.nodes():
+            for feat_dict in features.values():
+                if node not in feat_dict:
+                    feat_dict[node] = 0.0
+                
+        return features
+
+"""

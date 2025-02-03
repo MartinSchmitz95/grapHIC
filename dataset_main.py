@@ -93,14 +93,14 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         dataset_object.pickle_save(nx_graph, dataset_object.merged_graphs_path)
         print("saved merged Hi-C graph")
 
-    if 'pile-o-gram' in gen_step_config:
-        if gen_step_config['pile-o-gram']:
-            print(f"Creating pog files with raft {chrN}_{i}")
-            dataset_object.run_raft()
-            #dataset_object.nx_utg_ftrs(nx_graph)
-            dataset_object.create_pog_features(nx_graph)
-            print(f"Done with pog features {chrN}_{i}")
-            dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
+    #if 'pile-o-gram' in gen_step_config:
+    #    if gen_step_config['pile-o-gram']:
+    #        print(f"Creating pog files with raft {chrN}_{i}")
+    #        #dataset_object.run_raft()
+    #        #dataset_object.nx_utg_ftrs(nx_graph)
+    #        dataset_object.create_pog_features(nx_graph)
+    #        print(f"Done with pog features {chrN}_{i}")
+    #        dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
 
     if dataset_object.diploid and gen_step_config['diploid_features']:
         dataset_object.pickle_save(nx_graph, dataset_object.nx_graphs_path)
