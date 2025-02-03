@@ -7,13 +7,13 @@ paths:
   hifiasm_dump: /home/stuleon/scratch/dumps/hifiasm_dump_4
   raft_path: /home/stuleon/vendor/RAFT
   centromere_coords: /dev/null
-  hic_readsfiles_pairs :
+  hic_readsfiles_pairs:
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R1.fastq.gz','/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R2.fastq.gz']
   nextflow_path: "$(which nextflow)"
   # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
   # with nf-core tools installed
-  hic_pipeline_path: /home/stuleon/nf-core-hic_2.1.0/2_1_0/main.nf
+  hic_pipeline_path: /home/stuleon/prj/nf-core-hic_2.1.0/2_1_0/main.nf
 gen_config:
   depth: 20
   threads: 16
@@ -23,13 +23,14 @@ gen_config:
   prep_decoding: False
   raft: False
 gen_steps:
-  sample_reads: True
-  create_graphs: True
-  parse_gfa: False
-  pile-o-gram: False
-  diploid_features: False
-  ground_truth: False
-  ml_graphs: False
+  sample_reads: False
+  create_graphs: False
+  parse_gfa: True
+  hic: True
+  pile-o-gram: True
+  diploid_features: True
+  ground_truth: True
+  ml_graphs: True
 nfcore_hic:
   # using dnase mode
   dnase: True
@@ -38,7 +39,8 @@ nfcore_hic:
   # relax alignment quality
   # do local alignment instead of e2e, to respect omnic reads
   # allow up to 4 alignments; should make alignment to unitigs work better
-  bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  #bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  bwt2_opts_end2end: '--very-sensitive-local -L 30 -N 0 --score-min G,20,8 --local --reorder'
   min_mapq: 5 # mapq not meaningful with --keep
 
   #split_fastq: True
@@ -57,9 +59,17 @@ nextflow: |
   profile = 'docker'
 
   process {
-      resourceLimits = [ cpus: 24, memory: 768.GB, time: 72.h ]
+      resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
+  }
+  process {
+      withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
+          cpus = 32
+          memory = 256.GB
+          time = 48.h
+      }
   }
 training:
-  i002c_v04.multi_10: 100
+  i002c_v04.multi_21: 100
+  i002c_v04.multi_10: 0
 validation:
   i002c_v04.multi_5: 0
