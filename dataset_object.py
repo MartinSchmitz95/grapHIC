@@ -1470,17 +1470,20 @@ class HicDatasetCreator:
             reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
         else:
             reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
-        coverage_stats = os.path.join(self.coverage_path, f'{self.genome_str}_coverage_stats.txt')
+        coverage_stats = os.path.join(self.coverage_path, f'{self.genome_str}.hic.cov.tsv')
+
+        # use hic short read alignments for now 
+        hic_alns = os.path.join(self.hic_sample_path, 'mapping', '*.bam')
         
-        # First map reads to unitigs using BBMap
-        # Then pipe the output to pileup.sh
-        #TODO run bbmap per hand first
-        cmd = (f"bbmap.sh -Xmx20g ref={unitig_fasta} in={reads_file} nodisk=t "
-               f"| pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} stdev=t secondary=f samstreamer=t")
+        cmd = f"samtools cat {hic_alns} | samtools view | pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} ref={unitig_fasta} stdev=t secondary=f samstreamer=t"
         
         try:
             # Run the pipeline
             subprocess.run(cmd, shell=True, check=True)
+
+            u2n = {}
+            with open(self.unitig_2_node_path, 'rb') as f:
+                u2n = pickle.load(f)
             
             # Read the coverage statistics file
             coverage_data = {}
@@ -1501,25 +1504,29 @@ class HicDatasetCreator:
                 # Parse data lines
                 for line in f:
                     fields = line.strip().split('\t')
-                    node_id = int(fields[col_idx['id']])
+                    node_id = u2n[fields[col_idx['id']]][0]
                     
                     coverage_data[node_id] = {
-                        'cov_avg': float(fields[col_idx['cov_avg']]) / self.depth,  # Normalize by expected depth
+                        'cov_avg': float(fields[col_idx['cov_avg']]),# / self.depth,
                         'cov_pct': float(fields[col_idx['cov_pct']]),
-                        'cov_med': float(fields[col_idx['cov_med']]) / self.depth,  # Normalize by expected depth
-                        'cov_stdev': float(fields[col_idx['cov_std']]) / self.depth,  # Normalize by expected depth
+                        'cov_med': float(fields[col_idx['cov_med']]),# / self.depth,
+                        'cov_stdev': float(fields[col_idx['cov_std']]),# / self.depth,
                         'read_gc': float(fields[col_idx['read_gc']])
                     }
             
+            nx.set_node_attributes(nx_graph, coverage_data)
+            self.node_attrs.extend(['cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc'])
+
             # Add features to graph
-            for feature_name in ['cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']:
-                feature_dict = {node: coverage_data.get(node, {}).get(feature_name, 0.0) 
-                              for node in nx_graph.nodes()}
-                nx.set_node_attributes(nx_graph, feature_dict, feature_name)
-                
-                # Add to node_attrs list for normalization
-                if feature_name not in self.node_attrs:
-                    self.node_attrs.append(feature_name)
+            #for feature_name in ['cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']:
+            #    #TODO this might be slow
+            #    feature_dict = {node: coverage_data.get(node, {}).get(feature_name, 0.0) 
+            #                  for node in nx_graph.nodes()}
+            #    nx.set_node_attributes(nx_graph, feature_dict, feature_name)
+            #    
+            #    # Add to node_attrs list for normalization
+            #    if feature_name not in self.node_attrs:
+            #        self.node_attrs.append(feature_name)
             
             print(f"Added pileup coverage features to {len(coverage_data)} nodes")
             
