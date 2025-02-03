@@ -1,13 +1,18 @@
 import torch
 import argparse
 import os
-import numpy as np
-import matplotlib.pyplot as plt
+import gzip
 import yaml
 import pickle
+
+import numpy as np
+import matplotlib.pyplot as plt
+
 from Bio import SeqIO
 from SGformer_HG import SGFormer
-import gzip
+
+
+
 def load_model(checkpoint_path, config):
     """Load the SGFormer model with specified configuration."""
     model = SGFormer(
@@ -63,6 +68,7 @@ def create_unitig_info_dict(graph, predictions, utg_dict):
     Returns:
         Dictionary with unitig IDs as keys and (new_node_id, prediction, chr, pog_median) as values
     """
+    #TODO cut out chr?
     unitig_info = {}
     
     for utg_id, (node1, node2) in utg_dict.items():

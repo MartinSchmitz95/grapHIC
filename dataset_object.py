@@ -86,7 +86,7 @@ class HicDatasetCreator:
                 os.makedirs(folder)
 
         #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
-        self.node_attrs = ['in_degree', 'pog_median', 'pog_median_capped', 'pog_max', 'pog_min', 'read_length', 'hic_neighbor_weight']
+        self.node_attrs = ['in_degree', 'read_length'] #TODO bbmap features ]#, 'hic_neighbor_weight']
         #'coverage_std', 'coverage_skew', 'coverage_kurtosis', 'coverage_q1', 'coverage_q3',
         #'coverage_iqr', 'coverage_cv', 'coverage_peaks', 'coverage_density']
 
@@ -1562,7 +1562,8 @@ class HicDatasetCreator:
         )
 
         # Add read_length to normalization list
-        node_attrs_to_normalize = ['in_degree', 'pog_median', 'read_length', 'pog_max', 'pog_min', 'hic_neighbor_weight']
+        #TODO bbmap cov. divide by mean but no variance
+        node_attrs_to_normalize = ['in_degree', 'read_length'] #TODO BBmap features? #, 'hic_neighbor_weight']
         self.normalize_ftrs(pyg_data, node_attrs_to_normalize)
 
         # Save PyG graph
