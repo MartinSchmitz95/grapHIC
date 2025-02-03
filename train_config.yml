@@ -1,0 +1,12 @@
+training:
+  seed: 1
+  num_epochs: 200
+  num_gnn_layers: 8
+  num_trans_layers: 1
+  hidden_features: 256
+  node_features: 7
+  gnn_dropout: 0.5
+  lr: 0.0001
+  wandb_mode: 'online'
+  decay: 0.95
+  patience: 2

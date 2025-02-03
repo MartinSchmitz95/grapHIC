@@ -109,7 +109,14 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
 
     if gen_step_config['ml_graphs']:
         nx_graph = dataset_object.load_nx_graph(multi=True)
+        #dataset_object.create_jellyfish_features(nx_graph)
+        #dataset_object.calculate_coverage_statistics(nx_graph)
+        #dataset_object.create_pog_features(nx_graph)
+        dataset_object.create_pileup_features(nx_graph)
+        #dataset_object.create_hh_features(nx_graph)
+        dataset_object.pickle_save(nx_graph, dataset_object.merged_graphs_path)
         nx_multi_reduced = dataset_object.convert_to_single_stranded(nx_graph)
+        nx_multi_reduced = dataset_object.add_hic_neighbor_weights(nx_multi_reduced)
         dataset_object.save_to_dgl_and_pyg(nx_multi_reduced)
         print(f"Saved DGL and PYG graphs of {chrN}_{i}")
 

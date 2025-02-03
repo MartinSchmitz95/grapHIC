@@ -144,6 +144,8 @@ class SwitchLoss(nn.Module):
 
         return loss
 
+
+
 class HammingLoss(nn.Module):
     def __init__(self, lambda_1=1.0, lambda_2=1.0, lambda_3=1.0):
         super(HammingLoss, self).__init__()
@@ -170,6 +172,10 @@ class HammingLoss(nn.Module):
         y_true_j = y_true[dst].to(device)
         y_pred_i = y_pred[src].to(device)
         y_pred_j = y_pred[dst].to(device)
+
+        # Clip predictions to prevent extreme values
+        #y_pred_i = torch.clamp(y_pred_i, min=-10, max=10)
+        #y_pred_j = torch.clamp(y_pred_j, min=-10, max=10)
 
         # Calculate the indicators
         indicator_same_label = (y_true_i == y_true_j).float()
@@ -315,8 +321,8 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
     best_valid_loss = 10000
     overfit = not bool(valid_selection)
 
-    #hamming_loss = HammingLoss().to(device)
-    switch_loss = SwitchLoss().to(device)
+    hamming_loss = HammingLoss().to(device)
+    #switch_loss = SwitchLoss().to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=config['decay'], patience=config['patience'], verbose=True)
@@ -333,6 +339,7 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
 
             for idx, graph_name in enumerate(train_selection):
                 g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
+                
                 g = g.to(device)
 
                 yak_predictions = model(g).squeeze()
@@ -346,10 +353,10 @@ def train(model, data_path, train_selection, valid_selection, device, config, di
                 y = g.y
                 chr = g.chr
                 optimizer.zero_grad()
-               #loss_1 = hamming_loss(y, yak_predictions, src, dst, chr)
-                loss_2 = switch_loss(y, yak_predictions, src, dst, g, chr)
+                loss_1 = hamming_loss(y, yak_predictions, src, dst, chr)
+                #loss_2 = switch_loss(y, yak_predictions, src, dst, g, chr)
                 #print(loss_1, loss_2)
-                loss = loss_2
+                loss = loss_1
                 loss.backward()
                 train_loss.append(loss.item())
                 yak_frac_train.append(fraction_correct_yak(y, yak_predictions, chr))

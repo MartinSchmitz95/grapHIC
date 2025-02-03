@@ -18,6 +18,8 @@ from datetime import datetime
 import pandas as pd
 from torch_geometric.data import Data
 from torch_geometric.utils import degree
+import scipy.stats
+import scipy.signal
 
 class HicDatasetCreator:
     def __init__(self, ref_path, dataset_path, data_config='dataset.yml'):
@@ -59,7 +61,7 @@ class HicDatasetCreator:
         self.overlaps_path = os.path.join(dataset_path, "overlaps")
         self.pile_o_grams_path = os.path.join(dataset_path, "pile_o_grams")
         self.utg_2_reads_path = os.path.join(dataset_path, "utg_2_reads")
-
+        self.jellyfish_path = os.path.join(dataset_path, "jellyfish")
         # HiC stuff
         self.hic_path = os.path.join(dataset_path, "hic")
         self.hic_readsfiles_pairs = self.paths['hic_readsfiles_pairs']
@@ -70,19 +72,22 @@ class HicDatasetCreator:
         self.unitig_to_node_path = os.path.join(dataset_path, "unitig_2_node")
         self.hic_graphs_path = os.path.join(dataset_path, "hic_graphs")
         self.merged_graphs_path = os.path.join(dataset_path, "merged_graphs")
+        self.coverage_bbmap_path = os.path.join(dataset_path, "coverage_bbmap")
 
         self.deadends = {}
         self.gt_rescue = {}
         self.edge_info = {}
 
-        for folder in [self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
+        for folder in [self.coverage_bbmap_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
                        self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path,
                        self.hic_graphs_path, self.merged_graphs_path, self.unitig_to_node_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
         #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
-        self.node_attrs = ['read_length', 'pog_median','pog_max', 'pog_min', 'in_degree', 'out_degree'] # 'pog_median_capped', 
+        self.node_attrs = ['in_degree', 'pog_median', 'pog_median_capped', 'pog_max', 'pog_min', 'read_length', 'hic_neighbor_weight']
+        #'coverage_std', 'coverage_skew', 'coverage_kurtosis', 'coverage_q1', 'coverage_q3',
+        #'coverage_iqr', 'coverage_cv', 'coverage_peaks', 'coverage_density']
 
     def load_chromosome(self, genome, chr_id, ref_path):
         self.genome_str = f'{genome}_{chr_id}'
@@ -282,7 +287,7 @@ class HicDatasetCreator:
             for temp_file in temp_files + temp_descr_files:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
-
+    
     def run_raft(self):
         reads_file = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
         raft_depth = 2 * self.depth
@@ -312,8 +317,10 @@ class HicDatasetCreator:
         # Step 2: Run RAFT to create pil-o-gram
         frag_prefix = os.path.join(self.tmp_path, 'raft_out')
         pil_o_gram_path = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 100000 {reads_file} {merged_paf}.gz", shell=True, check=True)
+        subprocess.run(f"{self.raft_path}/raft -e {raft_depth} -o {frag_prefix} -l 1000000 {reads_file} {merged_paf}.gz", shell=True, check=True)
         shutil.move(frag_prefix + ".coverage.txt", pil_o_gram_path)
+        # Gzip the fragmented reads file
+        subprocess.run(f"gzip -f {frag_prefix}.reads.fasta", shell=True, check=True)
 
     def create_graphs(self):
         if self.real:
@@ -419,7 +426,7 @@ class HicDatasetCreator:
     def parse_gfa(self):
         nx_graph, read_seqs, unitig_2_node, utg_2_reads = self.only_from_gfa()
         # Save data
-        self.pickle_save(unitig_2_node, self.unitig_2_node_path)
+        self.pickle_save(unitig_2_node, self.unitig_to_node_path)
         self.pickle_save(utg_2_reads, self.utg_2_reads_path)
 
         
@@ -694,6 +701,8 @@ class HicDatasetCreator:
         print(strand)
         
         exit()
+
+
     def create_pog_features(self, nx_graph):
         """
         Create pog_median, pog_min, and pog_max features for each node and edge based on pile o gram data
@@ -703,7 +712,7 @@ class HicDatasetCreator:
         pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
 
         # Load the read_to_node_id mapping
-        read_to_node_path = os.path.join(self.read_to_node_path, f'{self.genome_str}.pkl')
+        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
         with open(read_to_node_path, 'rb') as f:
             read_to_node = pickle.load(f)
 
@@ -714,14 +723,35 @@ class HicDatasetCreator:
 
         # Store coverage data for each read
         read_coverages = {}
-        cis_read_coverages = {}
+        fasta_path = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
 
+        # Load FASTA IDs in order
+        fasta_ids = []
+        with gzip.open(fasta_path, 'rt') as f:
+            for record in SeqIO.parse(f, 'fasta'):
+                fasta_ids.append(record.id)
+        
+        # Count reads in pile-o-gram file
+        pog_count = 0
+        with open(pog_file, 'r') as f:
+            for line in f:
+                if line.startswith('read'):
+                    pog_count += 1
+                    
+        print(f"\nNumber of reads in fasta file: {len(fasta_ids)}")
+        print(f"Number of reads in pile-o-gram file: {pog_count}")
+        if len(fasta_ids) != pog_count:
+            print("Warning: Mismatch between number of reads in fasta and pile-o-gram files")
+            exit()
+        
         # Process full coverage file
+        pog_line_count = 0
         with open(pog_file, 'r') as f:
             for line in f:
                 if line.startswith('read'):
                     parts = line.strip().split()
-                    read_id = parts[1]
+                    # Use FASTA ID instead of POG file ID
+                    read_id = fasta_ids[pog_line_count]
                     coverages = [int(part.split(',')[1]) for part in parts[2:] if ',' in part]
                     read_coverages[read_id] = coverages
                     if read_id in read_to_node:
@@ -733,7 +763,23 @@ class HicDatasetCreator:
                             pog_median[node_id] = median / self.depth
                             pog_min[node_id] = min_val / self.depth
                             pog_max[node_id] = max_val / self.depth
+                    else:
+                        print(f"Read {read_id} not found in read_to_node mapping")
+                        exit()
+                    pog_line_count += 1
 
+        # Calculate statistics for pog_median
+        """median_values = list(pog_median.values())
+        print("\nPile-o-gram median statistics:")
+        print(f"Mean: {np.mean(median_values):.3f}")
+        print(f"Std: {np.std(median_values):.3f}")
+        print(f"Min: {np.min(median_values):.3f}")
+        print(f"Max: {np.max(median_values):.3f}")
+        print(f"25th percentile: {np.percentile(median_values, 25):.3f}")
+        print(f"50th percentile: {np.percentile(median_values, 50):.3f}")
+        print(f"75th percentile: {np.percentile(median_values, 75):.3f}")
+        exit()"""
+        
         nx.set_node_attributes(nx_graph, pog_median, 'pog_median')
         nx.set_node_attributes(nx_graph, pog_min, 'pog_min')
         nx.set_node_attributes(nx_graph, pog_max, 'pog_max')
@@ -842,6 +888,199 @@ class HicDatasetCreator:
                     gt_hap[node] = -1
         nx.set_node_attributes(nx_graph, gt_hap, 'gt_hap')
 
+    def create_jellyfish_features(self, nx_graph):
+        """
+        Create k-mer coverage features for each node using Jellyfish and add them as node attributes.
+        Uses unitig fasta file as input.
+        """
+        print("Creating jellyfish features...")
+        def decompress_file(input_file, output_file):
+            """Decompress a gzipped file to a temporary file."""
+            with gzip.open(input_file, "rt") as infile, open(output_file, "w") as outfile:
+                for line in infile:
+                    outfile.write(line)
+        def calculate_kmer_coverage(read_sequence, kmer_counts, kmer_size, coverage=20):
+            """Calculate coverage statistics (median, variance, max) for a read."""
+            if len(read_sequence) < kmer_size:
+                return {'median': 0, 'variance': 0, 'max': 0, 'filtered_avg': 0}
+
+            # Collect coverage values for all k-mers, excluding zero coverage k-mers
+            kmer_coverages = []
+            for i in range(len(read_sequence) - kmer_size + 1):
+                kmer = read_sequence[i:i + kmer_size]
+                coverage = kmer_counts.get(kmer, 0)
+                if coverage > 0:  # Only include k-mers with non-zero coverage
+                    kmer_coverages.append(coverage)
+
+            if not kmer_coverages:
+                return {'median': 0, 'variance': 0, 'max': 0, 'filtered_avg': 0}
+
+            # Calculate statistics
+            sorted_coverages = sorted(kmer_coverages)
+            n = len(sorted_coverages)
+            
+            # Calculate median
+            if n % 2 == 0:
+                median = (sorted_coverages[n//2 - 1] + sorted_coverages[n//2]) / 2
+            else:
+                median = sorted_coverages[n//2]
+
+            # Calculate variance
+            mean = sum(kmer_coverages) / n
+            variance = sum((x - mean) ** 2 for x in kmer_coverages) / n
+
+            # Get maximum
+            max_coverage = max(kmer_coverages)
+
+            # Calculate filtered average (excluding kmers with coverage > 3x coverage)
+            coverage_threshold = 2.1 * coverage
+            filtered_coverages = [cov for cov in kmer_coverages if cov <= coverage_threshold]
+            filtered_avg = sum(filtered_coverages) / len(filtered_coverages) if filtered_coverages else 0
+
+            # Calculate filtered median (using same threshold)
+            filtered_median = 0
+            if filtered_coverages:
+                filtered_coverages.sort()
+                n = len(filtered_coverages)
+                if n % 2 == 0:
+                    filtered_median = (filtered_coverages[n//2 - 1] + filtered_coverages[n//2]) / 2
+                else:
+                    filtered_median = filtered_coverages[n//2]
+                if n ==0:
+                    filtered_median = 5 * coverage
+
+            return {
+                'median': median,
+                'variance': variance,
+                'max': max_coverage,
+                'filtered_avg': filtered_avg,
+                'filtered_median': filtered_median
+            }
+
+        def run_jellyfish(reads_file, kmer_size, output_file):
+            """Run Jellyfish to compute k-mer frequencies."""
+            decompressed_file = "decompressed_reads.fasta"
+
+            # Decompress the file if it is gzipped
+            if reads_file.endswith(".gz"):
+                print(f"Decompressing {reads_file}...")
+                decompress_file(reads_file, decompressed_file)
+                reads_file = decompressed_file
+
+            jellyfish_count_cmd = [
+                "jellyfish", "count",
+                "-C", "-m", str(kmer_size), "-s", "1G", "-t", "8",
+                reads_file, "-o", "mer_counts.jf"
+            ]
+            subprocess.run(jellyfish_count_cmd, check=True)
+
+            jellyfish_dump_cmd = [
+                "jellyfish", "dump", "-c", "mer_counts.jf"
+            ]
+            with open(output_file, "w") as out:
+                subprocess.run(jellyfish_dump_cmd, check=True, stdout=out)
+
+            # Clean up the decompressed file
+            if os.path.exists(decompressed_file):
+                os.remove(decompressed_file)
+
+        def calculate_read_coverage(reads_file, kmer_hist_file, output_file, kmer_size):
+            """Estimate coverage per read using k-mer frequencies."""
+            # Load k-mer counts into a dictionary
+            kmer_counts = {}
+            with open(kmer_hist_file, "r") as f:
+                for line in f:
+                    kmer, count = line.strip().split()
+                    kmer_counts[kmer] = int(count)
+
+            # Parse reads and calculate coverage statistics per read
+            read_coverage = {}
+            with gzip.open(reads_file, "rt") if reads_file.endswith(".gz") else open(reads_file, "r") as f:
+                read_id = None
+                read_sequence = []
+
+                for line in f:
+                    line = line.strip()
+                    if line.startswith(">"):
+                        # Process previous read
+                        if read_id is not None:
+                            read_seq = "".join(read_sequence)
+                            coverage_stats = calculate_kmer_coverage(read_seq, kmer_counts, kmer_size)
+                            read_coverage[read_id] = coverage_stats
+
+                        # Start a new read - take only the first part before space
+                        read_id = line[1:].split()[0]
+                        read_sequence = []
+                    else:
+                        read_sequence.append(line)
+
+                # Process the last read
+                if read_id is not None:
+                    read_seq = "".join(read_sequence)
+                    coverage_stats = calculate_kmer_coverage(read_seq, kmer_counts, kmer_size)
+                    read_coverage[read_id] = coverage_stats
+
+            # Write read coverage statistics to output file
+            with open(output_file, "w") as out:
+                # Write CSV header
+                out.write("read_id,median_coverage,variance,max_coverage,filtered_avg,filtered_median\n")
+                for read_id, stats in read_coverage.items():
+                    out.write(f"{read_id},{stats['median']:.2f},{stats['variance']:.2f},{stats['max']:.2f},{stats['filtered_avg']:.2f},{stats['filtered_median']:.2f}\n")
+        
+        # Define paths
+        kmer_size = 31  # Standard k-mer size
+        unitig_fasta = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
+        kmer_hist_file = os.path.join(self.jellyfish_path, f'{self.genome_str}_kmers.txt')
+        coverage_output = os.path.join(self.jellyfish_path, f'{self.genome_str}_coverage.csv')
+        
+        # Run jellyfish to get k-mer frequencies
+        print("Running jellyfish...")
+        run_jellyfish(unitig_fasta, kmer_size, kmer_hist_file)
+        
+        # Calculate coverage statistics for each read
+        print("Calculating coverage statistics...")
+        calculate_read_coverage(unitig_fasta, kmer_hist_file, coverage_output, kmer_size)
+        
+        # Read coverage statistics and add to graph
+        coverage_stats = {}
+        with open(coverage_output, 'r') as f:
+            # Skip header
+            next(f)
+            for line in f:
+                read_id, median_cov, variance, max_cov, filtered_avg, filtered_median = line.strip().split(',')
+                coverage_stats[read_id] = {
+                    'kmer_median': float(median_cov),
+                    'kmer_variance': float(variance),
+                    'kmer_max': float(max_cov),
+                    'kmer_filtered_avg': float(filtered_avg),
+                    'kmer_filtered_median': float(filtered_median)
+                }
+        
+        # Add coverage statistics as node attributes
+        print("Adding coverage statistics as node attributes...")
+        for node in nx_graph.nodes():
+            node_data = nx_graph.nodes[node]
+            node_id = str(node)  # Convert node ID to string to match read IDs
+            
+            if node_id in coverage_stats:
+                for stat_name, stat_value in coverage_stats[node_id].items():
+                    node_data[stat_name] = stat_value
+            else:
+                # Set default values if node not found in coverage stats
+                for stat_name in ['kmer_median', 'kmer_variance', 'kmer_max', 'kmer_filtered_avg', 'kmer_filtered_median']:
+                    node_data[stat_name] = 0.0
+        
+        # Add new attributes to node_attrs list for normalization later
+        self.node_attrs.extend(['kmer_median', 'kmer_variance', 'kmer_max', 'kmer_filtered_avg', 'kmer_filtered_median'])
+        
+        # Clean up temporary files
+        print("Cleaning up temporary files...")
+        for temp_file in [kmer_hist_file, coverage_output]:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        
+        print("Jellyfish features created successfully")
+
     def process_vcf_file(self, file_path):
         # Open the file (handle .gz compression if necessary)
         with gzip.open(file_path, 'rt') as f:
@@ -858,14 +1097,248 @@ class HicDatasetCreator:
         print(len(variant_starts), len(variant_ends))
         return variant_starts, variant_ends
 
+    def calculate_coverage_statistics(self, nx_graph):
+        """
+        Calculate extended coverage statistics for each node
+        Returns dict of feature dictionaries
+        """
+        features = {
+            'coverage_std': {},
+            'coverage_skew': {},
+            'coverage_kurtosis': {},
+            'coverage_q1': {},
+            'coverage_q3': {},
+            'coverage_iqr': {},
+            'coverage_cv': {},  # coefficient of variation
+            'coverage_peaks': {},
+            'coverage_density': {}
+        }
+        
+        # Load coverage data
+        pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
+        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        
+        with open(read_to_node_path, 'rb') as f:
+            read_to_node = pickle.load(f)
+        
+        # Process coverage file
+        with open(pog_file, 'r') as f:
+            for line in f:
+                if line.startswith('read'):
+                    parts = line.strip().split()
+                    read_id = parts[1]
+                    coverages = np.array([int(part.split(',')[1]) for part in parts[2:] if ',' in part])
+                    
+                    if read_id in read_to_node:
+                        node_ids = read_to_node[read_id]
+                        
+                        # Calculate statistics
+                        std = np.std(coverages)
+                        skew = scipy.stats.skew(coverages)
+                        kurt = scipy.stats.kurtosis(coverages)
+                        q1, q3 = np.percentile(coverages, [25, 75])
+                        iqr = q3 - q1
+                        cv = std / np.mean(coverages) if np.mean(coverages) != 0 else 0
+                        
+                        # Count peaks (local maxima)
+                        peaks = len(scipy.signal.find_peaks(coverages)[0])
+                        
+                        # Calculate coverage density (% positions above mean)
+                        density = np.mean(coverages > np.mean(coverages))
+                        
+                        # Assign to all associated nodes
+                        for node_id in node_ids:
+                            features['coverage_std'][node_id] = std / self.depth
+                            features['coverage_skew'][node_id] = skew
+                            features['coverage_kurtosis'][node_id] = kurt
+                            features['coverage_q1'][node_id] = q1 / self.depth
+                            features['coverage_q3'][node_id] = q3 / self.depth
+                            features['coverage_iqr'][node_id] = iqr / self.depth
+                            features['coverage_cv'][node_id] = cv
+                            features['coverage_peaks'][node_id] = peaks
+                            features['coverage_density'][node_id] = density
+        
+        # Set default values for nodes without coverage data
+        for node in nx_graph.nodes():
+            for feat_dict in features.values():
+                if node not in feat_dict:
+                    feat_dict[node] = 0.0
+                
+        return features
+
+    def calculate_sequence_features(self, nx_graph):
+        """
+        Calculate sequence-based features for each node
+        Returns dict of feature dictionaries
+        """
+        features = {
+            'gc_content': {},
+            'seq_complexity': {},
+            'homopolymer_runs': {},
+            'palindrome_count': {},
+            'kmer_entropy': {}
+        }
+        
+        def calculate_gc_content(seq):
+            """Calculate GC content of sequence"""
+            gc_count = seq.count('G') + seq.count('C')
+            return gc_count / len(seq) if len(seq) > 0 else 0
+        
+        def calculate_sequence_complexity(seq):
+            """Calculate sequence complexity using k-mer entropy"""
+            k = 3  # Use 3-mers
+            kmers = [seq[i:i+k] for i in range(len(seq)-k+1)]
+            kmer_freq = Counter(kmers)
+            total_kmers = len(kmers)
+            entropy = 0
+            for count in kmer_freq.values():
+                prob = count / total_kmers
+                entropy -= prob * np.log2(prob)
+            return entropy
+        
+        def find_homopolymer_runs(seq):
+            """Count homopolymer runs longer than 3 bases"""
+            pattern = r'([ACGT])\1{2,}'
+            runs = re.findall(pattern, seq)
+            return len(runs)
+        
+        def count_palindromes(seq, min_len=4):
+            """Count palindromic sequences of minimum length"""
+            count = 0
+            for i in range(len(seq)-min_len+1):
+                for j in range(i+min_len, len(seq)+1):
+                    subseq = seq[i:j]
+                    if subseq == subseq[::-1]:
+                        count += 1
+            return count
+        
+        def calculate_kmer_entropy(seq, k=2):
+            """Calculate entropy of k-mer distribution"""
+            kmers = [seq[i:i+k] for i in range(len(seq)-k+1)]
+            kmer_freq = Counter(kmers)
+            total_kmers = len(kmers)
+            entropy = 0
+            for count in kmer_freq.values():
+                prob = count / total_kmers
+                entropy -= prob * np.log2(prob)
+            return entropy
+        
+        # Get sequences for each node
+        fasta_path = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
+        with gzip.open(fasta_path, 'rt') as f:
+            for record in SeqIO.parse(f, 'fasta'):
+                node_id = int(record.id)
+                seq = str(record.seq)
+                
+                # Calculate features
+                features['gc_content'][node_id] = calculate_gc_content(seq)
+                features['seq_complexity'][node_id] = calculate_sequence_complexity(seq)
+                features['homopolymer_runs'][node_id] = find_homopolymer_runs(seq)
+                features['palindrome_count'][node_id] = count_palindromes(seq)
+                features['kmer_entropy'][node_id] = calculate_kmer_entropy(seq)
+        
+        # Set default values for nodes without sequence data
+        for node in nx_graph.nodes():
+            for feat_dict in features.values():
+                if node not in feat_dict:
+                    feat_dict[node] = 0.0
+                
+        return features
+
+    def calculate_topological_features(self, nx_graph):
+        """
+        Calculate graph topology-based features for each node
+        Returns dict of feature dictionaries
+        """
+        features = {
+            'clustering_coeff': {},
+            'betweenness_cent': {},
+            'closeness_cent': {},
+            'eigenvector_cent': {},
+            'pagerank': {},
+            'triangle_count': {},
+            'avg_neighbor_degree': {},
+            'local_efficiency': {}
+        }
+        
+        # Convert multigraph to simple graph for some calculations
+        simple_graph = nx.Graph()
+        for u, v, data in nx_graph.edges(data=True):
+            if simple_graph.has_edge(u, v):
+                # If edge exists, update weight
+                simple_graph[u][v]['weight'] += data.get('weight', 1.0)
+            else:
+                # Add new edge with weight
+                simple_graph.add_edge(u, v, weight=data.get('weight', 1.0))
+        
+        print("Calculating clustering coefficients...")
+        clustering = nx.clustering(simple_graph)
+        features['clustering_coeff'] = clustering
+        
+        print("Calculating betweenness centrality...")
+        betweenness = nx.betweenness_centrality(simple_graph, weight='weight')
+        features['betweenness_cent'] = betweenness
+        
+        print("Calculating closeness centrality...")
+        closeness = nx.closeness_centrality(simple_graph, distance='weight')
+        features['closeness_cent'] = closeness
+        
+        print("Calculating eigenvector centrality...")
+        try:
+            eigenvector = nx.eigenvector_centrality(simple_graph, weight='weight')
+            features['eigenvector_cent'] = eigenvector
+        except:
+            print("Warning: Eigenvector centrality calculation failed, using default values")
+            features['eigenvector_cent'] = {node: 0.0 for node in nx_graph.nodes()}
+        
+        print("Calculating PageRank...")
+        pagerank = nx.pagerank(simple_graph, weight='weight')
+        features['pagerank'] = pagerank
+        
+        print("Calculating triangle counts...")
+        triangles = nx.triangles(simple_graph)
+        features['triangle_count'] = triangles
+        
+        print("Calculating average neighbor degree...")
+        avg_neighbor_degree = nx.average_neighbor_degree(simple_graph, weight='weight')
+        features['avg_neighbor_degree'] = avg_neighbor_degree
+        
+        print("Calculating local efficiency...")
+        # Local efficiency is the average efficiency of local subgraphs
+        local_efficiency = {}
+        for node in nx_graph.nodes():
+            neighbors = list(nx_graph.neighbors(node))
+            if len(neighbors) > 1:
+                subgraph = nx_graph.subgraph(neighbors)
+                try:
+                    efficiency = nx.global_efficiency(subgraph)
+                except:
+                    efficiency = 0.0
+            else:
+                efficiency = 0.0
+            local_efficiency[node] = efficiency
+        features['local_efficiency'] = local_efficiency
+        
+        # Normalize features to [0,1] range
+        for feat_name, feat_dict in features.items():
+            values = np.array(list(feat_dict.values()))
+            if len(values) > 0:
+                min_val = np.min(values)
+                max_val = np.max(values)
+                if max_val > min_val:
+                    for node in feat_dict:
+                        feat_dict[node] = (feat_dict[node] - min_val) / (max_val - min_val)
+        
+        return features
 
     def convert_to_single_stranded(self, nx_graph):
         """
         Converts double-stranded graph to single-stranded by removing odd-numbered nodes
         and redirecting their edges to their even-numbered complements.
         """
-        print(f"Initial graph: {nx_graph.number_of_nodes()} nodes, {nx_graph.number_of_edges()} edges")
         
+        print(f"Initial graph: {nx_graph.number_of_nodes()} nodes, {nx_graph.number_of_edges()} edges")
+
         # Count initial edge types
         initial_edge_types = {}
         for _, _, _, data in nx_graph.edges(data=True, keys=True):
@@ -932,6 +1405,33 @@ class HicDatasetCreator:
         print(f"Final edge type distribution: {final_edge_types}")
         print(f"Duplicate edges processed: {duplicate_counts}")
 
+        """# Create subgraph with nodes where read_chr==1
+        nodes_to_keep = [n for n, attr in single_stranded.nodes(data=True) if attr['read_chr'] == "1"]
+        chr1_subgraph = single_stranded.subgraph(nodes_to_keep).copy()
+        
+        # Get connected components
+        components = list(nx.connected_components(chr1_subgraph))
+        
+        # Count components by size
+        size_counts = {}
+        for comp in components:
+            size = len(comp)
+            size_counts[size] = size_counts.get(size, 0) + 1
+            
+        print(f"\nTotal number of components: {len(components)}")
+        print("\nComponent size distribution:")
+        for size in sorted(size_counts.keys()):
+            print(f"{size_counts[size]}x length {size}")
+            
+        # Check if chr1 is fully connected
+        if len(components) > 1:
+            print(f"\nWarning: Chromosome 1 is split into {len(components)} components")
+            print("Component sizes:", [len(comp) for comp in components])
+        else:
+            print("\nChromosome 1 is fully connected")
+        
+        single_stranded = chr1_subgraph  # Replace original graph with chr1 subgraph
+        exit()"""
         return single_stranded
     
     
@@ -1021,17 +1521,27 @@ class HicDatasetCreator:
         gt_hap = [nx_graph.nodes[node]['gt_hap'] for node in range(num_nodes)]
         gt_tensor = torch.tensor(gt_hap, dtype=torch.long)
         
+        # Extract chromosome numbers and convert to tensor
+        chr_numbers = []
+        for node in range(num_nodes):
+            chr_str = nx_graph.nodes[node]['read_chr']
+            # Extract number from string like 'chrX' or 'X'
+            chr_num = int(chr_str.replace('chr', ''))
+            chr_numbers.append(chr_num)
+        chr_tensor = torch.tensor(chr_numbers, dtype=torch.long)
         # Create PyG Data object
+
         pyg_data = Data(
             x=x,
             edge_index=edge_index,
             edge_type=edge_type,
             edge_weight=edge_weight,
-            y=gt_tensor
+            y=gt_tensor,
+            chr=chr_tensor  # Add chromosome tensor to the data object
         )
 
         # Add read_length to normalization list
-        node_attrs_to_normalize = ['read_length', 'pog_median', 'pog_max', 'pog_min', 'in_degree', 'out_degree']
+        node_attrs_to_normalize = ['in_degree', 'pog_median', 'read_length', 'pog_max', 'pog_min', 'hic_neighbor_weight']
         self.normalize_ftrs(pyg_data, node_attrs_to_normalize)
 
         # Save PyG graph
@@ -1073,3 +1583,112 @@ class HicDatasetCreator:
         print(f"Std:  {torch.std(pyg_data.x, dim=0)}")
         
         return pyg_data
+
+    def add_hic_neighbor_weights(self, nx_graph):
+        """
+        Add a node feature that sums the weights of all HiC edges connected to each node
+        """
+        hic_weights_sum = {}
+        
+        # Iterate through all nodes
+        for node in nx_graph.nodes():
+            total_weight = 0
+            # Get all edges connected to this node
+            for _, neighbor, key, data in nx_graph.edges(node, data=True, keys=True):
+                edge_type = data.get('type')
+                # Ensure edge_type is a string
+                if isinstance(edge_type, list):
+                    edge_type = edge_type[0]
+                # Sum weights only for HiC edges
+                if edge_type == 'hic':
+                    total_weight += data.get('weight', 1.0)
+            hic_weights_sum[node] = total_weight
+        
+        # Add the feature to the graph
+        nx.set_node_attributes(nx_graph, hic_weights_sum, 'hic_neighbor_weight')
+        
+        # Add to node_attrs list if not already present
+        if 'hic_neighbor_weight' not in self.node_attrs:
+            self.node_attrs.append('hic_neighbor_weight')
+        
+        print(f"Added HiC neighbor weights feature to {len(hic_weights_sum)} nodes")
+        
+        return nx_graph
+
+    def create_pileup_features(self, nx_graph):
+        """
+        Create coverage features using BBMap's pileup.sh script and add them to the NetworkX graph.
+        Uses the unitig FASTA file as reference and maps the full reads against it.
+        
+        Features added:
+        - avg_fold: Average fold coverage
+        - covered_percent: Percent of bases covered
+        - median_fold: Median fold coverage
+        - coverage_stdev: Standard deviation of coverage
+        - read_gc: GC content percentage
+        """
+        print("Creating pileup coverage features...")
+        
+        # Define input/output paths
+        unitig_fasta = os.path.join(self.fasta_unitig_path, f'{self.genome_str}.fasta.gz')
+        if self.real:
+            reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
+        else:
+            reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
+        coverage_stats = os.path.join(self.coverage_bbmap_path, f'{self.genome_str}_coverage_stats.txt')
+        
+        # First map reads to unitigs using BBMap
+        # Then pipe the output to pileup.sh
+        cmd = (f"bbmap.sh -Xmx20g ref={unitig_fasta} in={reads_file} nodisk=t "
+               f"| pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} "
+               f"arrays=t header=t stdev=t secondary=f samstreamer=t")
+        
+        try:
+            # Run the pipeline
+            subprocess.run(cmd, shell=True, check=True)
+            
+            # Read the coverage statistics file
+            coverage_data = {}
+            with open(coverage_stats, 'r') as f:
+                # Skip header line (starts with #)
+                header = f.readline().strip('#').strip().split('\t')
+                
+                # Create index mapping for each column
+                col_idx = {
+                    'id': header.index('ID'),
+                    'avg_fold': header.index('Avg_fold'),
+                    'covered_percent': header.index('Covered_percent'),
+                    'median_fold': header.index('Median_fold'),
+                    'std_dev': header.index('Std_Dev'),
+                    'read_gc': header.index('Read_GC')
+                }
+                
+                # Parse data lines
+                for line in f:
+                    fields = line.strip().split('\t')
+                    node_id = int(fields[col_idx['id']])
+                    
+                    coverage_data[node_id] = {
+                        'avg_fold': float(fields[col_idx['avg_fold']]) / self.depth,  # Normalize by expected depth
+                        'covered_percent': float(fields[col_idx['covered_percent']]),
+                        'median_fold': float(fields[col_idx['median_fold']]) / self.depth,  # Normalize by expected depth
+                        'coverage_stdev': float(fields[col_idx['std_dev']]) / self.depth,  # Normalize by expected depth
+                        'read_gc': float(fields[col_idx['read_gc']])
+                    }
+            
+            # Add features to graph
+            for feature_name in ['avg_fold', 'covered_percent', 'median_fold', 
+                               'coverage_stdev', 'read_gc']:
+                feature_dict = {node: coverage_data.get(node, {}).get(feature_name, 0.0) 
+                              for node in nx_graph.nodes()}
+                nx.set_node_attributes(nx_graph, feature_dict, feature_name)
+                
+                # Add to node_attrs list for normalization
+                if feature_name not in self.node_attrs:
+                    self.node_attrs.append(feature_name)
+            
+            print(f"Added pileup coverage features to {len(coverage_data)} nodes")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"Error running pileup.sh: {e}")
+            raise

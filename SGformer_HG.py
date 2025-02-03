@@ -364,9 +364,9 @@ class SGFormer(nn.Module):
 
         # Adjust final layer input dimensions
         if aggregate == "add":
-            self.fc = nn.Linear(2 * hidden_channels, out_channels)  # From GraphConv's concatenated output
+            self.fc =  nn.Sequential(nn.Linear(2 * hidden_channels, out_channels), nn.Tanh())  # From GraphConv's concatenated output
         elif aggregate == "cat":
-            self.fc = nn.Linear(3 * hidden_channels, out_channels)  # 2x from GraphConv + 1x from TransConv
+            self.fc = nn.Sequential(nn.Linear(3 * hidden_channels, out_channels), nn.Tanh())  # 2x from GraphConv + 1x from TransConv
         else:
             raise ValueError(f"Invalid aggregate type:{aggregate}")
 
@@ -386,6 +386,7 @@ class SGFormer(nn.Module):
         else:
             x = x1
         x = self.fc(x)
+
         return x
 
     def get_attentions(self, x):
