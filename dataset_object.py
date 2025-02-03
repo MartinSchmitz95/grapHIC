@@ -86,9 +86,7 @@ class HicDatasetCreator:
                 os.makedirs(folder)
 
         #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
-        self.node_attrs = ['in_degree', 'read_length'] #TODO bbmap features ]#, 'hic_neighbor_weight']
-        #'coverage_std', 'coverage_skew', 'coverage_kurtosis', 'coverage_q1', 'coverage_q3',
-        #'coverage_iqr', 'coverage_cv', 'coverage_peaks', 'coverage_density']
+        self.node_attrs = ['in_degree', 'read_length', 'cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']
 
     def load_chromosome(self, genome, chr_id, ref_path):
         self.genome_str = f'{genome}_{chr_id}'
@@ -1561,17 +1559,19 @@ class HicDatasetCreator:
             chr=chr_tensor  # Add chromosome tensor to the data object
         )
 
-        # Add read_length to normalization list
-        #TODO bbmap cov. divide by mean but no variance
-        node_attrs_to_normalize = ['in_degree', 'read_length'] #TODO BBmap features? #, 'hic_neighbor_weight']
-        self.normalize_ftrs(pyg_data, node_attrs_to_normalize)
+        # Normalize features
+        self.normalize_ftrs(pyg_data, ['in_degree', 'read_length', 'cov_std', 'read_gc'],
+                            method='zscore')
+        self.normalize_ftrs(pyg_data, ['cov_avg', 'cov_med'],
+                            method='mean')
+        # leave cov_pct unnormalized
 
         # Save PyG graph
         pyg_file = os.path.join(self.pyg_graphs_path, f'{self.genome_str}.pt')
         torch.save(pyg_data, pyg_file)
         print(f"Saved PyG graph of {self.genome_str}")
 
-    def normalize_ftrs(self, pyg_data, normalize_attrs):
+    def normalize_ftrs(self, pyg_data, normalize_attrs, method='zscore'):
         """
         Z-score normalize specified node features
         
@@ -1597,8 +1597,10 @@ class HicDatasetCreator:
             if i < pyg_data.x.shape[1]:  # Check if index is valid
                 mean = torch.mean(pyg_data.x[:, i])
                 std = torch.std(pyg_data.x[:, i])
-                if std != 0:  # Avoid division by zero
+                if method == 'zscore' and std != 0:  # Avoid division by zero
                     pyg_data.x[:, i] = (pyg_data.x[:, i] - mean) / std
+                elif method == 'mean' and mean != 0:
+                    pyg_data.x[:, i] = pyg_data.x[:, i] / mean
         
         print("\nFeature statistics after normalization:")
         print(f"Mean: {torch.mean(pyg_data.x, dim=0)}")
@@ -1643,9 +1645,9 @@ class HicDatasetCreator:
         Uses the unitig FASTA file as reference and maps the full reads against it.
         
         Features added:
-        - avg_fold: Average fold coverage
-        - covered_percent: Percent of bases covered
-        - median_fold: Median fold coverage
+        - cov_avg: Average fold coverage
+        - cov_pct: Percent of bases covered
+        - cov_med: Median fold coverage
         - coverage_stdev: Standard deviation of coverage
         - read_gc: GC content percentage
         """
@@ -1663,8 +1665,7 @@ class HicDatasetCreator:
         # Then pipe the output to pileup.sh
         #TODO run bbmap per hand first
         cmd = (f"bbmap.sh -Xmx20g ref={unitig_fasta} in={reads_file} nodisk=t "
-               f"| pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} "
-               f"arrays=t header=t stdev=t secondary=f samstreamer=t")
+               f"| pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} stdev=t secondary=f samstreamer=t")
         
         try:
             # Run the pipeline
@@ -1679,10 +1680,10 @@ class HicDatasetCreator:
                 # Create index mapping for each column
                 col_idx = {
                     'id': header.index('ID'),
-                    'avg_fold': header.index('Avg_fold'),
-                    'covered_percent': header.index('Covered_percent'),
-                    'median_fold': header.index('Median_fold'),
-                    'std_dev': header.index('Std_Dev'),
+                    'cov_avg': header.index('Avg_fold'),
+                    'cov_pct': header.index('Covered_percent'),
+                    'cov_med': header.index('Median_fold'),
+                    'cov_std': header.index('Std_Dev'),
                     'read_gc': header.index('Read_GC')
                 }
                 
@@ -1692,16 +1693,15 @@ class HicDatasetCreator:
                     node_id = int(fields[col_idx['id']])
                     
                     coverage_data[node_id] = {
-                        'avg_fold': float(fields[col_idx['avg_fold']]) / self.depth,  # Normalize by expected depth
-                        'covered_percent': float(fields[col_idx['covered_percent']]),
-                        'median_fold': float(fields[col_idx['median_fold']]) / self.depth,  # Normalize by expected depth
-                        'coverage_stdev': float(fields[col_idx['std_dev']]) / self.depth,  # Normalize by expected depth
+                        'cov_avg': float(fields[col_idx['cov_avg']]) / self.depth,  # Normalize by expected depth
+                        'cov_pct': float(fields[col_idx['cov_pct']]),
+                        'cov_med': float(fields[col_idx['cov_med']]) / self.depth,  # Normalize by expected depth
+                        'cov_stdev': float(fields[col_idx['cov_std']]) / self.depth,  # Normalize by expected depth
                         'read_gc': float(fields[col_idx['read_gc']])
                     }
             
             # Add features to graph
-            for feature_name in ['avg_fold', 'covered_percent', 'median_fold', 
-                               'coverage_stdev', 'read_gc']:
+            for feature_name in ['cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']:
                 feature_dict = {node: coverage_data.get(node, {}).get(feature_name, 0.0) 
                               for node in nx_graph.nodes()}
                 nx.set_node_attributes(nx_graph, feature_dict, feature_name)
