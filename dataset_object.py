@@ -82,7 +82,7 @@ class HicDatasetCreator:
 
         for folder in [self.coverage_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
                        self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path,
-                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_to_node_path]:
+                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
