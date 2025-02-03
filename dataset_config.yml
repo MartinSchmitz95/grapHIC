@@ -27,10 +27,10 @@ gen_steps:
   create_graphs: False
   parse_gfa: True
   hic: True
-  pile-o-gram: True
-  diploid_features: True
-  ground_truth: True
-  ml_graphs: True
+  pile-o-gram: False
+  diploid_features: False
+  ground_truth: False
+  ml_graphs: False
 nfcore_hic:
   # using dnase mode
   dnase: True
@@ -65,7 +65,12 @@ nextflow: |
       withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
           cpus = 32
           memory = 256.GB
-          time = 48.h
+          time = 5.d
+      }
+  }
+  process {
+      withName:COMBINE_MATES { // make sure it gets enough time
+          time = 24.h
       }
   }
 training:

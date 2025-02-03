@@ -342,7 +342,7 @@ class HicDatasetCreator:
         nf_params = self._write_nf_params()
         samplesheet = self._write_samplesheet()
 
-        call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path,
+        call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path, "-resume",
                         "-c", nf_conf,
                         "-params-file", nf_params, "--input", samplesheet,
                          "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
