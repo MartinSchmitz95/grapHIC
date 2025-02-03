@@ -73,13 +73,13 @@ class HicDatasetCreator:
         self.unitig_2_node_path = os.path.join(dataset_path, "unitig_2_node")
         self.hic_graphs_path = os.path.join(dataset_path, "hic_graphs")
         self.merged_graphs_path = os.path.join(dataset_path, "merged_graphs")
-        self.coverage_bbmap_path = os.path.join(dataset_path, "coverage_bbmap")
+        self.coverage_path = os.path.join(dataset_path, "coverage")
 
         self.deadends = {}
         self.gt_rescue = {}
         self.edge_info = {}
 
-        for folder in [self.coverage_bbmap_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
+        for folder in [self.coverage_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
                        self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path, self.pile_o_grams_path,
                        self.hic_graphs_path, self.merged_graphs_path, self.unitig_to_node_path]:
             if not os.path.exists(folder):
@@ -1657,10 +1657,11 @@ class HicDatasetCreator:
             reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fastq.gz')
         else:
             reads_file = os.path.join(self.full_reads_path, f'{self.genome_str}.fasta.gz')
-        coverage_stats = os.path.join(self.coverage_bbmap_path, f'{self.genome_str}_coverage_stats.txt')
+        coverage_stats = os.path.join(self.coverage_path, f'{self.genome_str}_coverage_stats.txt')
         
         # First map reads to unitigs using BBMap
         # Then pipe the output to pileup.sh
+        #TODO run bbmap per hand first
         cmd = (f"bbmap.sh -Xmx20g ref={unitig_fasta} in={reads_file} nodisk=t "
                f"| pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} "
                f"arrays=t header=t stdev=t secondary=f samstreamer=t")
