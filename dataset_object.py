@@ -348,7 +348,7 @@ class HicDatasetCreator:
                          "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        #subprocess.run(call, shell=True, check=False, cwd=self.root_path)
+        subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
@@ -1473,16 +1473,16 @@ class HicDatasetCreator:
         coverage_stats = os.path.join(self.coverage_path, f'{self.genome_str}.hic.cov.tsv')
 
         # use hic short read alignments for now 
-        hic_alns = os.path.join(self.hic_sample_path, 'mapping', '*.bam')
+        #hic_alns = os.path.join(self.hic_sample_path, 'mapping', '*.bam')
         
-        cmd = f"samtools cat {hic_alns} | samtools view | pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} ref={unitig_fasta} stdev=t secondary=f samstreamer=t"
+        #cmd = f"samtools cat {hic_alns} | samtools view | pileup.sh -Xmx20g in=stdin.sam out={coverage_stats} ref={unitig_fasta} stdev=t secondary=f samstreamer=t"
         
         try:
             # Run the pipeline
             #subprocess.run(cmd, shell=True, check=True)
 
             u2n = {}
-            with open(self.unitig_2_node_path, 'rb') as f:
+            with open(os.path.join(self.unitig_2_node_path, self.genome_str + '.pkl'), 'rb') as f:
                 u2n = pickle.load(f)
             
             # Read the coverage statistics file
