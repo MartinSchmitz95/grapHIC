@@ -1459,7 +1459,7 @@ class HicDatasetCreator:
         - cov_avg: Average fold coverage
         - cov_pct: Percent of bases covered
         - cov_med: Median fold coverage
-        - coverage_stdev: Standard deviation of coverage
+        - cov_std: Standard deviation of coverage
         - read_gc: GC content percentage
         """
         print("Creating pileup coverage features...")
