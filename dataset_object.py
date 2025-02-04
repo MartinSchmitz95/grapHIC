@@ -1479,7 +1479,7 @@ class HicDatasetCreator:
         
         try:
             # Run the pipeline
-            subprocess.run(cmd, shell=True, check=True)
+            #subprocess.run(cmd, shell=True, check=True)
 
             u2n = {}
             with open(self.unitig_2_node_path, 'rb') as f:
@@ -1510,7 +1510,7 @@ class HicDatasetCreator:
                         'cov_avg': float(fields[col_idx['cov_avg']]),# / self.depth,
                         'cov_pct': float(fields[col_idx['cov_pct']]),
                         'cov_med': float(fields[col_idx['cov_med']]),# / self.depth,
-                        'cov_stdev': float(fields[col_idx['cov_std']]),# / self.depth,
+                        'cov_std': float(fields[col_idx['cov_std']]),# / self.depth,
                         'read_gc': float(fields[col_idx['read_gc']])
                     }
             
