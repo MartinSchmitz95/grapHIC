@@ -342,13 +342,13 @@ class HicDatasetCreator:
         nf_params = self._write_nf_params()
         samplesheet = self._write_samplesheet()
 
-        call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path, "-resume",
+        call = ' '.join([self.nextflow_call, "-log nextflow.log run", self.hic_pipeline_path, # "-resume",
                         "-c", nf_conf,
                         "-params-file", nf_params, "--input", samplesheet,
                          "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        subprocess.run(call, shell=True, check=False, cwd=self.root_path)
+        #subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
