@@ -1,0 +1,80 @@
+paths:
+  sample_profile: hg002hifi
+  pbsim_path: /home/stuleon/vendor/pbsim3
+  hifiasm_path: /home/stuleon/vendor/hifiasm-0.23.0/
+  raven_path: /home/stuleon/vendor/heron-raven
+  herro_path: /home/stuleon/vendor/herro_folder
+  hifiasm_dump: /home/stuleon/scratch/dumps/hifiasm_dump_4
+  raft_path: /home/stuleon/vendor/RAFT
+  centromere_coords: /dev/null
+  hic_readsfiles_pairs:
+    - ['/mnt/sod2-project/csb4/wgs/lovro_interns/leon/hg002/HG002.HiC_1_S1_R1_001.fastq.gz', '/mnt/sod2-project/csb4/wgs/lovro_interns/leon/hg002/HG002.HiC_1_S1_R2_001.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/lovro_interns/leon/hg002/HG002.HiC_1_S2_R1_001.fastq.gz', '/mnt/sod2-project/csb4/wgs/lovro_interns/leon/hg002/HG002.HiC_1_S2_R2_001.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/lovro_interns/leon/hg002/HG002.HiC_1_S3_R1_001.fastq.gz', '/mnt/sod2-project/csb4/wgs/lovro_interns/leon/hg002/HG002.HiC_1_S3_R2_001.fastq.gz']
+  nextflow_path: "$(which nextflow)"
+  # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
+  # with nf-core tools installed
+  hic_pipeline_path: /home/stuleon/prj/nf-core-hic_2.1.0/2_1_0/main.nf
+gen_config:
+  depth: 20
+  threads: 16
+  assembler: hifiasm
+  diploid: True
+  real: False
+  prep_decoding: False
+  raft: False
+gen_steps:
+  sample_reads: True
+  create_graphs: True
+  parse_gfa: True
+  hic: True
+  pile-o-gram: False
+  diploid_features: False
+  ground_truth: False
+  ml_graphs: False
+nfcore_hic:
+  # using dnase mode
+  dnase: True
+  min_cis_dist: 1000
+
+  # relax alignment quality
+  # do local alignment instead of e2e, to respect omnic reads
+  # allow up to 4 alignments; should make alignment to unitigs work better
+  #bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  bwt2_opts_end2end: '--very-sensitive-local -L 30 -N 0 --score-min G,20,8 --local --reorder'
+  min_mapq: 5 # mapq not meaningful with --keep
+
+  #split_fastq: True
+
+  # allow multi-mapping reads
+  keep_multi: True
+
+  skip_compartments: True
+  skip_dist_decay: True
+  skip_tads: True
+  skip_mcool: True
+  skip_balancing: False
+  skip_multiqc: False
+nextflow: |
+  workDir = '/raid/scratch/stuleon/unitig-work'
+  profile = 'docker'
+
+  process {
+      resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
+  }
+  process {
+      withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
+          cpus = 32
+          memory = 256.GB
+          time = 5.d
+      }
+  }
+  process {
+      withName:COMBINE_MATES { // make sure it gets enough time
+          time = 24.h
+      }
+  }
+training:
+  hg002_v101.multi_21: 10
+validation:
+  i002c_v04.multi_5: 0
