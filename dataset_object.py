@@ -51,7 +51,7 @@ class HicDatasetCreator:
         self.raft = gen_config['raft']
 
         self.root_path = dataset_path
-        self.tmp_path = os.path.join(dataset_path, 'tmp')
+        self.tmp_path = os.path.join(dataset_path, 'tmp_hg2')
         self.full_reads_path = os.path.join(dataset_path, "full_reads")
         self.read_descr_path = os.path.join(dataset_path, "read_descr")
         self.gfa_unitig_path = os.path.join(dataset_path, "gfa_unitig")
@@ -397,12 +397,12 @@ class HicDatasetCreator:
 
         export_connection_graph(
                 os.path.join(self.hic_sample_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
-                os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"),
+                os.path.join(self.hic_graphs_path, self.sample_name + ".nx.pkl"),
                 os.path.join(self.unitig_2_node_path, self.genome_str + '.pkl'))
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
-        with open(os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
+        with open(os.path.join(self.hic_graphs_path, self.genome_str + ".nx.pkl"), 'rb') as f:
             ret = pickle.load(f)
         return ret
 
