@@ -58,7 +58,7 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         
     #if i > 0:
     #   return
-    if i < 9 or i > 999:
+    if i != 12:
        return
 
     dataset_object.load_chromosome(genome, chr_id, ref_base)

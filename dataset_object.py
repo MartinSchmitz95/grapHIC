@@ -414,7 +414,7 @@ class HicDatasetCreator:
     def parse_gfa(self):
         nx_graph, read_seqs, unitig_2_node, utg_2_reads = self.only_from_gfa()
         # Save data
-        self.pickle_save(unitig_2_node, self.unitig_to_node_path)
+        self.pickle_save(unitig_2_node, self.unitig_2_node_path)
         self.pickle_save(utg_2_reads, self.utg_2_reads_path)
 
         
@@ -1585,7 +1585,7 @@ class HicDatasetCreator:
         pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
 
         # Load the read_to_node_id mapping
-        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        read_to_node_path = os.path.join(self.unitig_2_node_path, f'{self.genome_str}.pkl')
         with open(read_to_node_path, 'rb') as f:
             read_to_node = pickle.load(f)
 
@@ -1682,7 +1682,7 @@ class HicDatasetCreator:
         
         # Load coverage data
         pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        read_to_node_path = os.path.join(self.unitig_2_node_path, f'{self.genome_str}.pkl')
         
         with open(read_to_node_path, 'rb') as f:
             read_to_node = pickle.load(f)

@@ -30,7 +30,7 @@ gen_steps:
   pile-o-gram: False
   diploid_features: False
   ground_truth: False
-  ml_graphs: False
+  ml_graphs: True
 nfcore_hic:
   # using dnase mode
   dnase: True
@@ -60,6 +60,7 @@ nextflow: |
 
   process {
       resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
+      time = 5.d
   }
   process {
       withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
