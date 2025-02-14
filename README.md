@@ -1,4 +1,7 @@
-# ml_hic_phasing
+# grapHIC
+grapHIC phases diploid assembly graphs on unitig level using geometric deep learning.
 
-This is the first tool to successfully phase Diploid, Polyploid and Aneuploid assemblies, all on read level, perfectly.
-(Source is 'trust me bro')
+dataset_main.py: create a dataset
+train.py: train the grapHIC model
+
+change parameters in dataset_config.yml and model_config.yml to configure dataset creation and model training according to preferences.
