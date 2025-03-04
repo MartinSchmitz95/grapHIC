@@ -28,7 +28,6 @@ workflow HICPRO {
   fragments // path
   chrsize // path
   ligation_site // value
-  map_res // values
 
   main:
   ch_versions = Channel.empty()
@@ -112,6 +111,7 @@ workflow HICPRO {
     ch_hicpro_raw_maps = BUILD_CONTACT_MAPS.out.maps
  
     // run_ice
+	 // can probably skip this as we just want trans contacts?
     ICE_NORMALIZATION(
       BUILD_CONTACT_MAPS.out.maps
     )
