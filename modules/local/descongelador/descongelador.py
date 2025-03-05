@@ -19,6 +19,8 @@ import pickle
 import cooler
 from cooler import Cooler
 
+__version__ = '1.0'
+
 ## THOUGHTS
 # file formats:
 #     - support cool primarily
