@@ -162,8 +162,7 @@ def main(args):
     parser.add_argument("-d", dest='dictfile', required=True, type=ap.FileType('r'), help="File containing the Utig ID to Node ID mapping.")
 
     args = parser.parse_args()
-
-
+    export_connection_graph(args.infile.name, args.outfile.name, args.dictfile.name)
 
     # old main fn
     #infile = args[1]
