@@ -151,29 +151,43 @@ def export_connection_graph(infile, outfile, unitig_dict):
     save_pickle(graph, outfile)
 
 def main(args):
-    #TODO do proper argparsing later
-    infile = args[1]
-    outfile = args[2]
-    unitig_dict = load_pickle(args[3])
+    import argparse as ap
 
-    c = aggr_chrs(infile)
+    parser = ap.ArgumentParser(description="""
+    descongelador – thaw cooler hic connections into an adjacency graph
+    """)
 
-    np_tup = to_np_matrix(c)
+    parser.add_argument("-i", dest='infile', default='-', type=ap.FileType('r'), help="Input Cooler. Default stdin.")
+    parser.add_argument("-o", dest='outfile', default='-', type=ap.FileType('w'), help="Where to write the output networkx graph. Default stdout.")
+    parser.add_argument("-d", dest='dictfile', required=True, type=ap.FileType('r'), help="File containing the Utig ID to Node ID mapping.")
 
-    print("saving matrix to pickle")
-    save_pickle(np_tup[1], outfile + '.np.pickle')
+    args = parser.parse_args()
 
-    #print("saving NP matrix")
-    #save_np_matrix(np_tup, outfile + '.tsv')
 
-    print("converting to MultiGraph")
-    graph = to_graph(c, lambda x: unitig_dict[x])
 
-    print("saving MultiGraph")
-    save_pickle(graph, outfile + '.nx.pickle')
+    # old main fn
+    #infile = args[1]
+    #outfile = args[2]
+    #unitig_dict = load_pickle(args[3])
 
-    print("plotting image")
-    export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
+    #c = aggr_chrs(infile)
+
+    #np_tup = to_np_matrix(c)
+
+    #print("saving matrix to pickle")
+    #save_pickle(np_tup[1], outfile + '.np.pickle')
+
+    ##print("saving NP matrix")
+    ##save_np_matrix(np_tup, outfile + '.tsv')
+
+    #print("converting to MultiGraph")
+    #graph = to_graph(c, lambda x: unitig_dict[x])
+
+    #print("saving MultiGraph")
+    #save_pickle(graph, outfile + '.nx.pickle')
+
+    #print("plotting image")
+    #export_image(np_tup, outfile + ".png", scale=lambda x: np.log(x+1))
 
 
 if __name__ == '__main__':
