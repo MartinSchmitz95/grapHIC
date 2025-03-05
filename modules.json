@@ -54,6 +54,11 @@
             "branch": "master",
             "git_sha": "911696ea0b62df80e900ef244d7867d177971f73",
             "installed_by": ["modules"]
+          },
+          "hifiasm": {
+            "branch": "master",
+            "git_sha": "fcab846b30baf8391257dd302feece91714769f2",
+            "installed_by": ["modules"]
           }
         }
       },
