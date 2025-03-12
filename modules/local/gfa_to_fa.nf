@@ -1,0 +1,28 @@
+process GFA_TO_FA {
+    label 'process_medium'
+
+	 // needs to be called twice on the hifiasm output
+	 // to allow mapping to unitigs
+
+    input:
+    path gfa
+
+    output:
+    path "*.fa{.gz,}", emit: fasta
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def args = task.ext.args ?: ''
+	 def compress = true
+    def write_output = compress ? "| gzip > ${prefix}.fa.gzs" : "> ${prefix}.fa"
+    """
+	 awk '/^S/{print \">\"$2;print $3}' ${gfa} ${write_output}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        multiqc: \$( multiqc --version | sed -e "s/multiqc, version //g" )
+    END_VERSIONS
+    """
+}
