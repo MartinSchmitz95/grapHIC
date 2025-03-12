@@ -64,7 +64,6 @@ include { MULTIQC } from '../modules/local/multiqc'
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
 //
-include { INPUT_CHECK } from '../subworkflows/local/input_check'
 include { PREPARE_GENOME } from '../subworkflows/local/prepare_genome'
 include { HICPRO } from '../subworkflows/local/hicpro'
 include { COOLER } from '../subworkflows/local/cooler'
@@ -102,15 +101,11 @@ Channel.fromPath( params.fasta )
 def multiqc_report = []
 
 workflow HIC {
+  take:
+  fasta // filepath
+  ch_hic_reads // channel emitting pairs of files
 
   ch_versions = Channel.empty()
-
-  //
-  // SUBWORKFLOW: Read in samplesheet, validate and stage input files
-  //
-  INPUT_CHECK (
-    ch_input
-  )
 
   //
   // SUBWORKFLOW: Prepare genome annotation
@@ -125,7 +120,7 @@ workflow HIC {
   // MODULE: Run FastQC
   //
   FASTQC (
-    INPUT_CHECK.out.reads
+    ch_hic_reads
   )
   ch_versions = ch_versions.mix(FASTQC.out.versions)
 
@@ -202,25 +197,3 @@ workflow HIC {
   cool = COOL.out.cool
   multiqc_report = multiqc_report
 }
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    COMPLETION EMAIL AND SUMMARY
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-workflow.onComplete {
-    if (params.email || params.email_on_fail) {
-        NfcoreTemplate.email(workflow, params, summary_params, projectDir, log, multiqc_report)
-    }
-    NfcoreTemplate.summary(workflow, params, log)
-    if (params.hook_url) {
-        NfcoreTemplate.IM_notification(workflow, params, summary_params, projectDir, log)
-    }
-}
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    THE END
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
