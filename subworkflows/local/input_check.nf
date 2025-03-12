@@ -16,7 +16,7 @@ workflow INPUT_CHECK {
         .splitCsv ( header:true, sep:',' )
 	.map { create_fastq_channels(it) }
 	.splitFastq( by: params.fastq_chunks_size, pe:true, file: true, compress:true)
-	.map { it -> [it[0], [it[1], it[2]]]}
+	.map { it -> [it[0], [it[2], it[3]]]}
 	.groupTuple(by: [0])
         .flatMap { it -> setMetaChunk(it) }
         .collate(2)
@@ -25,22 +25,31 @@ workflow INPUT_CHECK {
 	//  meta.chunk = it[1].baseName - ~/.fastq(.gz)?/
 	//  return [meta, [it[1], it[2]]]
 	//}
-        .set { reads }
+        .set { hic_reads }
 
     }else{
       SAMPLESHEET_CHECK ( samplesheet )
       	.csv
         .splitCsv ( header:true, sep:',' )
         .map { create_fastq_channels(it) }
-	.map { it -> [it[0], [it[1], it[2]]]}
+	.map { it -> [it[0], [it[2], it[3]]]}
 	.groupTuple(by: [0])
         .flatMap { it -> setMetaChunk(it) }
         .collate(2)
-        .set { reads }
+        .set { hic_reads }
    }
+	SAMPLESHEET_CHECK ( samplesheet )
+		.csv
+	  .splitCsv ( header:true, sep:',' )
+	  //.map { create_fastq_channels(it) }
+	  .map { it -> [it[0], it[1]]}
+	  .groupTuple(by: [0])
+	  .flatMap { it -> setMetaChunk(it) }
+	  .set { reads }
 
     emit:
     reads // channel: [ val(meta), [ reads ] ]
+    hic_reads // channel: [ val(meta), [ reads ] ]
 }
 
 // Function to get list of [ meta, [ fastq_1, fastq_2 ] ]
@@ -50,13 +59,17 @@ def create_fastq_channels(LinkedHashMap row) {
   meta.single_end = false
 
   def array = []
-  if (!file(row.fastq_1).exists()) {
+  if (!file(row.fastq_1).exists() & file(row.fastq_2).exists()) {
     exit 1, "ERROR: Please check input samplesheet -> Read 1 FastQ file does not exist!\n${row.fastq_1}"
   }
-  if (!file(row.fastq_2).exists()) {
+  if (!file(row.fastq_2).exists() & file(row.fastq_1).exists()) {
     exit 1, "ERROR: Please check input samplesheet -> Read 2 FastQ file does not exist!\n${row.fastq_2}"
   }
-  array = [ meta, file(row.fastq_1), file(row.fastq_2) ]
+  // in case there are only regular reads given as input
+  if (!file(row.fastq_1).exists() & !file(row.fastq_2).exists()) {
+	  return []
+  }
+  array = [ meta, file(row.reads), file(row.fastq_1), file(row.fastq_2) ]
   return array
 }
 
