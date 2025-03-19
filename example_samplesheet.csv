@@ -1,0 +1,4 @@
+#id,reads,hic_reads1,hic_reads2
+hg002,./hg002_reads.fastq.gz,
+hg002,,/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz,/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz
+hg002,,/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R1.fastq.gz,/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R2.fastq.gz
