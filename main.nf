@@ -1,0 +1,123 @@
+#!/usr/bin/env nextflow
+
+nextflow.enable.dsl = 2
+
+// collection to start writing a main nextflow pipeline
+
+include { INPUT_CHECK } from './subworkflows/local/input_check'
+include { HIC } from './workflows/hic'
+
+
+workflow GRAPHIC{
+	take samplesheet
+
+	// parse input
+	INPUT_CHECK( samplesheet )
+
+	// run hifiasm to get unitigs
+	HIFIASM(
+		//INPUT_CHECK.reads.map { it -> [it[0], it[1].collectFile(), false }, // hifiasm should be able to handle multiple inputs
+		INPUT_CHECK.reads.map { it -> [it[0], it[1], false] },
+		false,
+		false
+	)
+
+	ch_utigs = HIFIASM.processed_unitigs
+
+	// align hic reads to unitigs
+	HIC(
+		ch_utigs.map { it -> it[1] },
+		INPUT_CHECK.hic_reads.map { it -> [it[1], it[2]] }
+	)
+
+	// merge graphs
+
+	// emit as training dataset
+
+	// deploy graphic model
+
+
+	// feed back into hifiasm?
+
+}
+
+
+///*
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//    VALIDATE INPUTS
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//*/
+//
+//def summary_params = NfcoreSchema.paramsSummaryMap(workflow, params)
+//
+//// Validate input parameters
+//WorkflowHic.initialise(params, log)
+//
+//// Check input path parameters to see if they exist
+//def checkPathParamList = [ params.input ]
+//checkPathParamList = [
+//    params.input, params.multiqc_config,
+//    params.fasta, params.bwt2_index
+//]
+//
+//for (param in checkPathParamList) { if (param) { file(param, checkIfExists: true) } }
+//
+//// Check mandatory parameters
+//if (params.input) { ch_input = file(params.input) } else { exit 1, 'Input samplesheet not specified!' }
+//
+////*****************************************
+//// Digestion parameters
+//if (params.digestion){
+//  restriction_site = params.digestion ? params.digest[ params.digestion ].restriction_site ?: false : false
+//  ch_restriction_site = Channel.value(restriction_site)
+//  ligation_site = params.digestion ? params.digest[ params.digestion ].ligation_site ?: false : false
+//  ch_ligation_site = Channel.value(ligation_site)
+//}else if (params.restriction_site && params.ligation_site){
+//  ch_restriction_site = Channel.value(params.restriction_site)
+//  ch_ligation_site = Channel.value(params.ligation_site)
+//}else if (params.dnase){
+//  ch_restriction_site = Channel.empty()
+//  ch_ligation_site = Channel.empty()
+//}else{
+//   exit 1, "Ligation motif not found. Please either use the `--digestion` parameters or specify the `--restriction_site` and `--ligation_site`. For DNase Hi-C, please use '--dnase' option"
+//}
+//
+//
+////
+//// SUBWORKFLOW: Prepare genome annotation
+////
+//PREPARE_GENOME(
+// ch_fasta,
+// ch_restriction_site
+//)
+//ch_versions = ch_versions.mix(PREPARE_GENOME.out.versions)
+//
+////
+//// MODULE: Run FastQC
+////
+//FASTQC (
+// INPUT_CHECK.out.reads
+//)
+//ch_versions = ch_versions.mix(FASTQC.out.versions)
+//
+////
+//// SUB-WORFLOW: HiC-Pro
+////
+//INPUT_CHECK.out.reads.view()
+//HICPRO (
+// INPUT_CHECK.out.reads,
+// PREPARE_GENOME.out.index,
+// PREPARE_GENOME.out.res_frag,
+// PREPARE_GENOME.out.chromosome_size,
+// ch_ligation_site
+//)
+//ch_versions = ch_versions.mix(HICPRO.out.versions)
+//
+////
+//// SUB-WORKFLOW: COOLER
+////
+//COOLER (
+// HICPRO.out.pairs,
+// PREPARE_GENOME.out.chromosome_size
+//)
+//ch_versions = ch_versions.mix(COOLER.out.versions)
