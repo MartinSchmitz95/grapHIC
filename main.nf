@@ -9,7 +9,10 @@ include { HIC } from './workflows/hic'
 
 
 workflow GRAPHIC{
-	take samplesheet
+	take:
+	samplesheet
+
+	main:
 
 	// parse input
 	INPUT_CHECK( samplesheet )

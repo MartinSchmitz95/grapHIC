@@ -4,10 +4,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-def summary_params = NfcoreSchema.paramsSummaryMap(workflow, params)
-
-// Validate input parameters
-WorkflowHic.initialise(params, log)
+nextflow.enable.dsl = 2
 
 // Check input path parameters to see if they exist
 def checkPathParamList = [ params.input ]
@@ -105,6 +102,8 @@ workflow HIC {
   fasta // filepath
   ch_hic_reads // channel emitting pairs of files
 
+  main:
+
   ch_versions = Channel.empty()
 
   //
@@ -173,6 +172,8 @@ workflow HIC {
   //
   // MODULE: MultiQC
   //
+
+  summary_params = NfcoreSchema.paramsSummaryMap(workflow, params)
   workflow_summary    = WorkflowHic.paramsSummaryMultiqc(workflow, summary_params)
   ch_workflow_summary = Channel.value(workflow_summary)
 
