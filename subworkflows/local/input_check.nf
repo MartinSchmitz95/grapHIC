@@ -1,5 +1,5 @@
 //
-// Check input samplesheet and get read channels
+// Check input samplesheet and get read and hic read channels
 //
 
 include { SAMPLESHEET_CHECK } from '../../modules/local/samplesheet_check'
@@ -27,7 +27,7 @@ workflow INPUT_CHECK {
 	//}
         .set { hic_reads }
 
-    }else{
+    } else {
       SAMPLESHEET_CHECK ( samplesheet )
       	.csv
         .splitCsv ( header:true, sep:',' )
