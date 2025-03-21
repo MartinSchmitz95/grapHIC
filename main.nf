@@ -25,7 +25,9 @@ workflow GRAPHIC{
 		false
 	)
 
-	ch_utigs = HIFIASM.processed_unitigs
+	GFA_TO_FA(HIFIASM.processed_unitigs)
+
+	ch_utigs = GFA_TO_FA.out.fasta
 
 	// align hic reads to unitigs
 	HIC(
