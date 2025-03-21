@@ -6,6 +6,7 @@ process MAKE_HIC_EDGES {
 
     input:
     tuple path(hic_contacts)
+    tuple path(ov_graph)
     tuple path(utg_dict)
 
     output:
@@ -17,7 +18,7 @@ process MAKE_HIC_EDGES {
 
     script:
     """
-    python3 ${moduleDir}/descongelador.py -i ${hic_contacts} -d ${utg_dict} -o contacts.nx.pkl
+    python3 ${moduleDir}/descongelador.py -i ${hic_contacts} -d ${utg_dict} --ov-graph ${ov_graph} -o contacts.nx.pkl
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
