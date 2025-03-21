@@ -9,8 +9,7 @@ nextflow.enable.dsl = 2
 // Check input path parameters to see if they exist
 def checkPathParamList = [ params.input ]
 checkPathParamList = [
-    params.input, params.multiqc_config,
-    params.fasta, params.bwt2_index
+    params.input, params.multiqc_config
 ]
 
 for (param in checkPathParamList) { if (param) { file(param, checkIfExists: true) } }
@@ -79,17 +78,6 @@ include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoft
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  CHANNELS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-Channel.fromPath( params.fasta )
-       .ifEmpty { exit 1, "Genome index: Fasta file not found: ${params.fasta}" }
-       .map{it->[[:],it]}
-       .set { ch_fasta }
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
@@ -99,7 +87,7 @@ def multiqc_report = []
 
 workflow HIC {
   take:
-  fasta // filepath
+  ch_fasta // filepath
   ch_hic_reads // channel emitting pairs of files
 
   main:
