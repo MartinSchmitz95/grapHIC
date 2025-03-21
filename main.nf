@@ -4,8 +4,10 @@ nextflow.enable.dsl = 2
 
 // collection to start writing a main nextflow pipeline
 
-include { INPUT_CHECK } from './subworkflows/local/input_check'
-include { HIC } from './workflows/hic'
+include { HIC            } from './workflows/hic'
+include { INPUT_CHECK    } from './subworkflows/local/input_check'
+include { GFA_TO_GRAPH   } from './subworkflows/local/gfa_to_graph'
+include { MAKE_HIC_EDGES } from './subworkflows/local/descongelador'
 
 
 workflow GRAPHIC{
@@ -25,6 +27,9 @@ workflow GRAPHIC{
 		false
 	)
 
+	// start graph construction already, can run in parallel
+	GFA_TO_GRAPH(HIFIASM.processed_unitigs)
+
 	GFA_TO_FA(HIFIASM.processed_unitigs)
 
 	ch_utigs = GFA_TO_FA.out.fasta
@@ -34,6 +39,9 @@ workflow GRAPHIC{
 		ch_utigs.map { it -> it[1] },
 		INPUT_CHECK.hic_reads.map { it -> [it[1], it[2]] }
 	)
+
+	// transform to graph structure
+	MAKE_HIC_EDGES(HIC.cool, GFA_TO_GRAPH.utg)
 
 	// merge graphs
 

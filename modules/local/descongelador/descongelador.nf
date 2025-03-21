@@ -5,7 +5,7 @@ process MAKE_HIC_EDGES {
     conda "${moduleDir}/env_desc.yml"
 
     input:
-    tuple val(meta), path(hic_contacts)
+    tuple path(hic_contacts)
     tuple path(utg_dict)
 
     output:

@@ -1,4 +1,4 @@
-process MAKE_HIC_EDGES {
+process GFA_TO_GRAPH {
     tag "$meta.id"
     label 'process_single'
 
