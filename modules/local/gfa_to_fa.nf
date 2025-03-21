@@ -22,7 +22,7 @@ process GFA_TO_FA {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        multiqc: \$( multiqc --version | sed -e "s/multiqc, version //g" )
+        awk: \$( awk --version | head -n 1 | sed -e "s/,.*$//g" )
     END_VERSIONS
     """
 }
