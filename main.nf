@@ -41,7 +41,7 @@ workflow GRAPHIC{
 	)
 
 	// transform to graph structure
-	MAKE_HIC_EDGES(HIC.cool, GFA_TO_GRAPH.utg)
+	MAKE_HIC_EDGES(HIC.cool, GFA_TO_GRAPH.utg_graph, GFA_TO_GRAPH.utg)
 
 	// merge graphs
 
