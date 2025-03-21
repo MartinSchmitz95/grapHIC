@@ -19,7 +19,7 @@ import pickle
 import cooler
 from cooler import Cooler
 
-__version__ = '1.0'
+__version__ = '1.1'
 
 ## THOUGHTS
 # file formats:
@@ -139,7 +139,12 @@ def export_image(intuple, path, scale=id):
     """
     plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
-def export_connection_graph(infile, outfile, unitig_dict):
+def merge_graphs(self, nx_graph, hic_graph):
+    nx.set_edge_attributes(hic_graph, "hic", "type")
+    nx.set_edge_attributes(nx_graph, "overlap", "type")
+    return nx.compose(nx.MultiGraph(nx_graph), nx.MultiGraph(hic_graph))
+
+def get_connection_graph(infile, unitig_dict):
     print("aggregating cooler")
     c = aggr_chrs(infile)
 
@@ -147,10 +152,11 @@ def export_connection_graph(infile, outfile, unitig_dict):
     unitig_dict = load_pickle(unitig_dict)
 
     print("constructing graph")
-    graph = to_graph(c, lambda x: unitig_dict[x])
+    return to_graph(c, lambda x: unitig_dict[x])
 
-    print("saving graph")
-    save_pickle(graph, outfile)
+def export_connection_graph(infile, outfile, unitig_dict):
+    save_pickle(get_connection_graph(infile, unitig_dict), outfile)
+
 
 def main(args):
     import argparse as ap
@@ -162,9 +168,21 @@ def main(args):
     parser.add_argument("-i", dest='infile', default='-', type=ap.FileType('r'), help="Input Cooler. Default stdin.")
     parser.add_argument("-o", dest='outfile', default='-', type=ap.FileType('w'), help="Where to write the output networkx graph. Default stdout.")
     parser.add_argument("-d", dest='dictfile', required=True, type=ap.FileType('r'), help="File containing the Utig ID to Node ID mapping.")
+    parser.add_argument("--ov-graph", "-g", dest='ov_graph', type=ap.FileType('r'), help="Optional input of a graph to add the edges to. If specified, will label the edges already present as 'overlap' and new ones as 'hic'.")
 
     args = parser.parse_args()
-    export_connection_graph(args.infile.name, args.outfile.name, args.dictfile.name)
+    graph = get_connection_graph(args.infile.name, args.dictfile.name)
+
+    if args.ov_graph:
+        print("loading OV graph")
+        ov_graph = load_pickle(args.ov_graph.name)
+
+        print("Merging with HiC")
+        graph = dataset_object.merged_graphs(graph, ov_graph)
+
+    print("saving merged graph")
+    save_pickle(graph, args.outfile.name)
+
 
     # old main fn
     #infile = args[1]
