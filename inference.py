@@ -66,9 +66,8 @@ def create_unitig_info_dict(graph, predictions, utg_dict):
         utg_dict: Dictionary mapping unitig IDs to node pairs
     
     Returns:
-        Dictionary with unitig IDs as keys and (new_node_id, prediction, chr, pog_median) as values
+        Dictionary with unitig IDs as keys and (new_node_id, prediction, chr, pog_median, gt_hap) as values
     """
-    #TODO cut out chr?
     unitig_info = {}
     
     for utg_id, (node1, node2) in utg_dict.items():
@@ -80,10 +79,13 @@ def create_unitig_info_dict(graph, predictions, utg_dict):
         
         # Get chromosome and pog_median from node features
         chr_val = graph.chr[new_node_id].item()
-        pog_median = graph.x[new_node_id, 2].item()  # Assuming pog_median is first feature
+        pog_median = graph.x[new_node_id, 9].item()  # Assuming pog_median is first feature
+        
+        # Get ground truth haplotype if available
+        gt_hap = graph.y[new_node_id].item() if hasattr(graph, 'y') else None
         
         # Store tuple in dictionary
-        unitig_info[utg_id] = (new_node_id, pred, chr_val, pog_median)
+        unitig_info[utg_id] = (new_node_id, pred, chr_val, pog_median, gt_hap)
     
     return unitig_info
 
@@ -92,21 +94,26 @@ def create_target_fastas(unitig_info, unitig_seqs):
     Create two gzipped FASTA files (pos.fasta.gz and neg.fasta.gz) based on predictions.
     
     Args:
-        unitig_info: Dictionary with unitig IDs mapping to (new_node_id, pred, chr, pog_median)
+        unitig_info: Dictionary with unitig IDs mapping to (new_node_id, pred, chr, pog_median, gt_hap)
         unitig_seqs: Dictionary with unitig IDs mapping to sequences
     """
     pos_records = []
     neg_records = []
     
-    for utg_id, (_, pred, _, pog_median) in unitig_info.items():
+    for utg_id, (_, pred, _, pog_median, gt_hap) in unitig_info.items():
         if utg_id not in unitig_seqs:
             continue
+            
+        # Create description with ground truth if available
+        desc = f"pred={pred:.3f} pog_median={pog_median:.3f}"
+        if gt_hap is not None:
+            desc += f" gt_hap={int(gt_hap)}"
             
         # Create SeqRecord object
         record = SeqIO.SeqRecord(
             seq=SeqIO.Seq(unitig_seqs[utg_id]),
             id=utg_id,
-            description=f"pred={pred:.3f} pog_median={pog_median:.3f}"
+            description=desc
         )
         
         # Add to both files if pog_median < 1.5
@@ -143,7 +150,7 @@ def check_threshold(graph):
         float: optimal threshold value
     """
     # Convert to numpy for easier analysis
-    pog_medians = graph.x[:, 2].numpy()  # Assuming pog_median is third feature
+    pog_medians = graph.x[:, 4].numpy()  # Assuming pog_median is third feature
     true_labels = (graph.y != 0).numpy().astype(int)  # 0 for O-nodes (y=0), 1 for E-nodes (y=±1)
     
     # Print basic statistics
@@ -153,7 +160,6 @@ def check_threshold(graph):
     # Check if we have both types of nodes
     o_nodes = pog_medians[true_labels == 0]
     e_nodes = pog_medians[true_labels == 1]
-    
     if len(o_nodes) == 0:
         print("Warning: No O-nodes found in the graph")
         print(f"E-nodes range: {np.min(e_nodes):.3f} to {np.max(e_nodes):.3f}")
@@ -163,6 +169,8 @@ def check_threshold(graph):
         print("Warning: No E-nodes found in the graph")
         exit()
     else:
+        print(f"O-nodes: {len(o_nodes)}")
+        print(f"E-nodes: {len(e_nodes)}")
         print(f"O-nodes range: {np.min(o_nodes):.3f} to {np.max(o_nodes):.3f}")
         print(f"E-nodes range: {np.min(e_nodes):.3f} to {np.max(e_nodes):.3f}")
     
@@ -188,14 +196,38 @@ def check_threshold(graph):
             best_threshold = threshold
             best_precision = precision
             best_recall = recall
+    # Get final node classifications at best threshold
+    final_predictions = (pog_medians > best_threshold).astype(int)
+    num_o_nodes = np.sum(final_predictions == 0)
+    num_e_nodes = np.sum(final_predictions == 1)
     
     print(f"\nThreshold Analysis Results:")
     print(f"Best threshold: {best_threshold:.4f}")
     print(f"Best accuracy: {best_accuracy:.4f}")
     print(f"Precision at best threshold: {best_precision:.4f}")
     print(f"Recall at best threshold: {best_recall:.4f}")
-    
+    print(f"\nFinal Node Classifications:")
+    print(f"O-nodes: {num_o_nodes}")
+    print(f"E-nodes: {num_e_nodes}")
+    exit()
     return best_threshold
+
+def show_x_ranges(graph):
+    """
+    Display the range (min, max) for each feature in graph.x.
+    
+    Args:
+        graph: PyG graph object containing node features
+    """
+    x_numpy = graph.x.numpy()
+    num_features = x_numpy.shape[1]
+    
+    print("\nFeature Ranges:")
+    print("--------------")
+    for i in range(num_features):
+        min_val = x_numpy[:, i].min()
+        max_val = x_numpy[:, i].max()
+        print(f"Feature {i}: min = {min_val:.3f}, max = {max_val:.3f}")
 
 def main():
     parser = argparse.ArgumentParser(description="Inference script for SGFormer model")
@@ -217,6 +249,9 @@ def main():
     
     # Load graph
     graph = torch.load(args.pyg_path)
+    
+    # Show feature ranges
+    show_x_ranges(graph)
     
     # Get predictions
     with torch.no_grad():

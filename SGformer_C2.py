@@ -292,7 +292,117 @@ class TransConv(nn.Module):
         return torch.stack(attentions, dim=0)  # [layer num, N, N]
 
 
-class SGFormer(nn.Module):
+class HeteroGraphConvLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, use_weight=True, use_init=False):
+        super(HeteroGraphConvLayer, self).__init__()
+
+        self.use_init = use_init
+        self.use_weight = use_weight
+        # Adjust input channels to handle concatenated features from previous layer
+        if self.use_init:
+            in_channels_ = 2 * in_channels
+        else:
+            in_channels_ = in_channels
+        self.W = nn.Linear(in_channels_, out_channels)
+
+    def reset_parameters(self):
+        self.W.reset_parameters()
+
+    def forward(self, x, edge_index, edge_weight, x0):
+        N = x.shape[0]
+        row, col = edge_index
+        d = degree(col, N).float()
+        d_norm_in = (1.0 / d[col]).sqrt()
+        d_norm_out = (1.0 / d[row]).sqrt()
+        # Multiply the normalization with edge weights
+        value = edge_weight * d_norm_in * d_norm_out
+        value = torch.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)
+        adj = SparseTensor(row=col, col=row, value=value, sparse_sizes=(N, N))
+        x = matmul(adj, x)  # [N, D]
+
+        if self.use_init:
+            x = torch.cat([x, x0], 1)
+        if self.use_weight:
+            x = self.W(x)
+
+        return x
+
+
+class AlternatingGraphConv(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels,
+        num_layers=2,
+        dropout=0.5,
+        use_bn=True,
+        use_residual=True,
+        use_weight=True,
+        use_init=False,
+        use_act=True,
+    ):
+        super(AlternatingGraphConv, self).__init__()
+
+        self.convs = nn.ModuleList()
+        self.fcs = nn.ModuleList()
+        self.fcs.append(nn.Linear(in_channels, hidden_channels))
+
+        self.bns = nn.ModuleList()
+        self.bns.append(nn.BatchNorm1d(hidden_channels))
+        
+        # Create layers that will alternate between edge types
+        for _ in range(num_layers):
+            self.convs.append(
+                HeteroGraphConvLayer(hidden_channels, hidden_channels, use_weight, use_init)
+            )
+            self.bns.append(nn.BatchNorm1d(hidden_channels))
+
+        self.dropout = dropout
+        self.activation = F.relu
+        self.use_bn = use_bn
+        self.use_residual = use_residual
+        self.use_act = use_act
+        self.num_layers = num_layers
+
+    def reset_parameters(self):
+        for conv in self.convs:
+            conv.reset_parameters()
+        for bn in self.bns:
+            bn.reset_parameters()
+        for fc in self.fcs:
+            fc.reset_parameters()
+
+    def forward(self, x, edge_index, edge_type, edge_weight):
+        layer_ = []
+
+        x = self.fcs[0](x)
+        if self.use_bn:
+            x = self.bns[0](x)
+        x = self.activation(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+
+        layer_.append(x)
+
+        for i, conv in enumerate(self.convs):
+            # Alternate between edge types (0 and 1)
+            edge_type_idx = i % 2
+            mask = edge_type == edge_type_idx
+            edge_index_i = edge_index[:, mask]
+            edge_weight_i = edge_weight[mask]
+            
+            x = conv(x, edge_index_i, edge_weight_i, layer_[0])
+            if self.use_bn:
+                x = self.bns[i + 1](x)
+            if self.use_act:
+                x = self.activation(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            if self.use_residual:
+                x = x + layer_[-1]
+            layer_.append(x)
+        return x
+
+
+class SGFormerC2(nn.Module):
     def __init__(
         self,
         in_channels,
@@ -301,8 +411,7 @@ class SGFormer(nn.Module):
         trans_num_layers=1,
         trans_num_heads=1,
         trans_dropout=0.5,
-        gnn_num_layers_0=1,  # Number of layers for edge type 0
-        gnn_num_layers_1=1,  # Number of layers for edge type 1
+        gnn_num_layers=2,  # Total number of GNN layers (will alternate between edge types)
         gnn_dropout=0.5,
         gnn_use_weight=True,
         gnn_use_init=False,
@@ -315,6 +424,8 @@ class SGFormer(nn.Module):
         trans_use_weight=True,
         trans_use_act=True,
         use_graph=True,
+        aggregate="cat",  # Added parameter for aggregation method
+        projection_dim=None,  # Dimension for projection head (defaults to out_channels if None)
     ):
         super().__init__()
         
@@ -331,23 +442,11 @@ class SGFormer(nn.Module):
             trans_use_act,
         )
         
-        # Create two separate GNNs with different numbers of layers
-        self.graph_conv_0 = GraphConv(
+        # Create a single GNN that alternates between edge types
+        self.graph_conv = AlternatingGraphConv(
             in_channels,
             hidden_channels,
-            gnn_num_layers_0,  # Different number of layers for type 0
-            gnn_dropout,
-            gnn_use_bn,
-            gnn_use_residual,
-            gnn_use_weight,
-            gnn_use_init,
-            gnn_use_act,
-        )
-        
-        self.graph_conv_1 = GraphConv(
-            in_channels,
-            hidden_channels,
-            gnn_num_layers_1,  # Different number of layers for type 1
+            gnn_num_layers,
             gnn_dropout,
             gnn_use_bn,
             gnn_use_residual,
@@ -357,50 +456,78 @@ class SGFormer(nn.Module):
         )
         
         self.use_graph = use_graph
+        self.aggregate = aggregate
 
-        # Final layer always expects 3 * hidden_channels
-        self.fc = nn.Sequential(
-            nn.Linear(3 * hidden_channels, out_channels),
+        # Determine embedding input dimension based on aggregation method
+        if aggregate == "cat":
+            embedding_input_dim = 2 * hidden_channels
+        else:
+            raise ValueError(f"Invalid aggregate type: {aggregate}")
+
+        # Create two separate embedding layers for dual representation
+        self.embedding1 = nn.Sequential(
+            nn.Linear(embedding_input_dim, out_channels),
             nn.Tanh()
+        )
+        
+        self.embedding2 = nn.Sequential(
+            nn.Linear(embedding_input_dim, out_channels),
+            nn.Tanh()
+        )
+        
+        # Create projection head for contrastive learning
+        if projection_dim is None:
+            projection_dim = out_channels
+            
+        # Projection heads for both embeddings
+        self.projection_head1 = nn.Sequential(
+            nn.Linear(out_channels, hidden_channels),
+            nn.ReLU(),
+            nn.Linear(hidden_channels, projection_dim)
+        )
+        
+        self.projection_head2 = nn.Sequential(
+            nn.Linear(out_channels, hidden_channels),
+            nn.ReLU(),
+            nn.Linear(hidden_channels, projection_dim)
         )
 
     def forward(self, data):
         x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
         
-        """# Remove columns 10 and 12 from x
-        cols_to_keep = torch.ones(x.shape[1], dtype=torch.bool)
-        cols_to_keep[10] = False
-        cols_to_keep[12] = False
-
-        x = x[:, cols_to_keep]"""
-
         # Get transformer embeddings
         x_trans = self.trans_conv(x, edge_type)
         
         if self.use_graph:
-            # Process edge type 0
-            mask_0 = edge_type == 0
-            edge_index_0 = edge_index[:, mask_0]
-            edge_weight_0 = edge_weight[mask_0]
-            x_graph_0 = self.graph_conv_0(x, edge_index_0, edge_weight_0)
+            # Process graph with alternating edge types
+            x_graph = self.graph_conv(x, edge_index, edge_type, edge_weight)
             
-            # Process edge type 1
-            mask_1 = edge_type == 1
-            edge_index_1 = edge_index[:, mask_1]
-            edge_weight_1 = edge_weight[mask_1]
-            x_graph_1 = self.graph_conv_1(x, edge_index_1, edge_weight_1)
-            
-            # Concatenate all embeddings [transformer, graph_type0, graph_type1]
-            x = torch.cat([x_trans, x_graph_0, x_graph_1], dim=1)
+            # Concatenate transformer and graph embeddings
+            x = torch.cat([x_trans, x_graph], dim=1)
         else:
             # If not using graph, pad with zeros to maintain dimension
             batch_size = x_trans.shape[0]
             hidden_dim = x_trans.shape[1]
-            padding = torch.zeros(batch_size, 2 * hidden_dim).to(x_trans.device)
+            padding = torch.zeros(batch_size, hidden_dim).to(x_trans.device)
             x = torch.cat([x_trans, padding], dim=1)
         
-        x = self.fc(x)
-        return x
+        # Generate two different embeddings
+        embeddings1 = self.embedding1(x)
+        embeddings2 = self.embedding2(x)
+        
+        # Apply L2 normalization to embeddings
+        embeddings1 = F.normalize(embeddings1, p=2, dim=1)
+        embeddings2 = F.normalize(embeddings2, p=2, dim=1)
+        
+        # Generate projections for contrastive learning
+        projections1 = self.projection_head1(embeddings1)
+        projections2 = self.projection_head2(embeddings2)
+        
+        # Apply L2 normalization to projections
+        projections1 = F.normalize(projections1, p=2, dim=1)
+        projections2 = F.normalize(projections2, p=2, dim=1)
+        
+        return embeddings1, embeddings2, projections1, projections2
 
     def get_attentions(self, x):
         attns = self.trans_conv.get_attentions(x)  # [layer num, N, N]
@@ -409,5 +536,20 @@ class SGFormer(nn.Module):
     def reset_parameters(self):
         self.trans_conv.reset_parameters()
         if self.use_graph:
-            self.graph_conv_0.reset_parameters()
-            self.graph_conv_1.reset_parameters()
+            self.graph_conv.reset_parameters()
+        
+        # Reset all linear layers in the embedding networks
+        for module in self.embedding1:
+            if isinstance(module, nn.Linear):
+                module.reset_parameters()
+        for module in self.embedding2:
+            if isinstance(module, nn.Linear):
+                module.reset_parameters()
+                
+        # Reset all linear layers in the projection heads
+        for module in self.projection_head1:
+            if isinstance(module, nn.Linear):
+                module.reset_parameters()
+        for module in self.projection_head2:
+            if isinstance(module, nn.Linear):
+                module.reset_parameters()

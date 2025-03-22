@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 from datetime import datetime
 import numpy as np
-import train_utils
+import utils
 import argparse
 import yaml
 #from SymGatedGCN_DGL import SymGatedGCNYakModel
@@ -144,6 +144,8 @@ class SwitchLoss(nn.Module):
 
         return loss
 
+
+
 class HammingLoss(nn.Module):
     def __init__(self, lambda_1=1.0, lambda_2=1.0, lambda_3=1.0):
         super(HammingLoss, self).__init__()
@@ -258,7 +260,7 @@ class HammingLoss(nn.Module):
 
         return loss
     
-def global_phasing_quotient(y_true, y_pred, chr, debug=False):
+def fraction_correct_yak(y_true, y_pred, chr):
     device = y_true.device
     y_true = y_true.to(device)
     y_pred = y_pred.to(device)
@@ -290,6 +292,9 @@ def global_phasing_quotient(y_true, y_pred, chr, debug=False):
         # Calculate fractions for -1 and 1 for this chromosome
         sum_neg1_smaller_zero, sum_neg1_larger_zero = calculate_fractions(-1, chr_mask)
         sum_pos1_smaller_zero, sum_pos1_larger_zero = calculate_fractions(1, chr_mask)
+
+        print(f"Chr {c} fractions: neg<0:{sum_neg1_smaller_zero} neg>=0:{sum_neg1_larger_zero} "
+              f"pos<0:{sum_pos1_smaller_zero} pos>=0:{sum_pos1_larger_zero}")
         
         # Evaluate both combinations
         combination1 = (sum_neg1_smaller_zero + sum_pos1_larger_zero)
@@ -297,11 +302,68 @@ def global_phasing_quotient(y_true, y_pred, chr, debug=False):
         chr_total = combination1 + combination2
         
         if chr_total > 0:  # Only include chromosomes with valid predictions
+            print(f"Chr {c} combinations: {combination1} {combination2}, total: {chr_total}")
             chr_correct = max(combination1, combination2)
             total_correct += chr_correct
             total_samples += chr_total
-            if debug:
-                print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
+            print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
+
+    # Return metric based on all samples
+    if total_samples > 0:
+        final_metric = total_correct / total_samples
+        print(f"Overall metric: {total_correct}/{total_samples} = {final_metric:.3f}")
+        return final_metric
+    else:
+        print("No valid samples found")
+        return 0.0
+
+def global_phasing_quotient(y_true, y_pred, chr):
+    device = y_true.device
+    y_true = y_true.to(device)
+    y_pred = y_pred.to(device)
+    
+    def calculate_fractions(label, mask):
+        combined_mask = (y_true == label) & mask
+        preds = y_pred[combined_mask]
+        if len(preds) > 0:
+            sum_smaller_zero = (preds < 0).float().sum().item()
+            sum_larger_zero = (preds >= 0).float().sum().item()
+        else:
+            sum_smaller_zero = 0.0
+            sum_larger_zero = 0.0
+        return sum_smaller_zero, sum_larger_zero
+
+    # Get unique chromosomes
+    unique_chr = torch.unique(chr)
+    total_correct = 0
+    total_samples = 0
+
+    for c in unique_chr:
+        # Create mask for current chromosome
+        chr_mask = (chr == c)
+        
+        # Skip chromosomes with no valid labels
+        if not ((y_true[chr_mask] == 1).any() or (y_true[chr_mask] == -1).any()):
+            continue
+
+        # Calculate fractions for -1 and 1 for this chromosome
+        sum_neg1_smaller_zero, sum_neg1_larger_zero = calculate_fractions(-1, chr_mask)
+        sum_pos1_smaller_zero, sum_pos1_larger_zero = calculate_fractions(1, chr_mask)
+
+        print(f"Chr {c} fractions: neg<0:{sum_neg1_smaller_zero} neg>=0:{sum_neg1_larger_zero} "
+              f"pos<0:{sum_pos1_smaller_zero} pos>=0:{sum_pos1_larger_zero}")
+        
+        # Evaluate both combinations
+        combination1 = (sum_neg1_smaller_zero + sum_pos1_larger_zero)
+        combination2 = (sum_neg1_larger_zero + sum_pos1_smaller_zero)
+        chr_total = combination1 + combination2
+        
+        if chr_total > 0:  # Only include chromosomes with valid predictions
+            print(f"Chr {c} combinations: {combination1} {combination2}, total: {chr_total}")
+            chr_correct = max(combination1, combination2)
+            total_correct += chr_correct
+            total_samples += chr_total
+            print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
 
     # Return metric based on all samples
     if total_samples > 0:
@@ -312,71 +374,7 @@ def global_phasing_quotient(y_true, y_pred, chr, debug=False):
         print("No valid samples found")
         return 0.0
     
-def local_phasing_quotient(y_true, y_pred, chr, edge_index, edge_type, debug=False):
-    if debug:
-        return local_phasing_quotient_debug(y_true, y_pred, chr, edge_index, edge_type)
-    else:
-        return local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type)
-
-def local_phasing_quotient_debug(y_true, y_pred, chr, edge_index, edge_type):
-    device = y_true.device
-    y_true = y_true.to(device)
-    y_pred = y_pred.to(device)
-    
-    # Get source and destination nodes
-    src_nodes = edge_index[0]
-    dst_nodes = edge_index[1]
-    
-    # Get unique chromosomes
-    unique_chr = torch.unique(chr)
-    total_correct = 0
-    total_edges = 0
-    
-    for c in unique_chr:
-        # Create combined mask for current chromosome
-        chr_mask = (
-            (edge_type == 0) &                           # overlap edges
-            (chr[src_nodes] == c) &                      # source node in current chromosome
-            (chr[dst_nodes] == c) &                      # destination node in current chromosome
-            (y_true[src_nodes] != 0) &                   # non-zero source labels
-            (y_true[dst_nodes] != 0)                     # non-zero destination labels
-        )
-        
-        if chr_mask.sum() == 0:
-            continue
-            
-        # Apply the mask for current chromosome
-        chr_src_nodes = src_nodes[chr_mask]
-        chr_dst_nodes = dst_nodes[chr_mask]
-        
-        # Get true labels and predictions for current chromosome
-        chr_src_true = y_true[chr_src_nodes]
-        chr_dst_true = y_true[chr_dst_nodes]
-        chr_src_pred = y_pred[chr_src_nodes]
-        chr_dst_pred = y_pred[chr_dst_nodes]
-        
-        # Calculate if predictions have same/different signs
-        chr_pred_same_phase = (chr_src_pred * chr_dst_pred) >= 0
-        chr_true_same_phase = (chr_src_true * chr_dst_true) >= 0
-        
-        # Count correct phasings for current chromosome
-        chr_correct = (chr_pred_same_phase == chr_true_same_phase).sum().item()
-        chr_total = chr_mask.sum().item()
-        
-        print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
-            
-        total_correct += chr_correct
-        total_edges += chr_total
-    
-    if total_edges == 0:
-        print("No valid edges found")
-        return 0.0
-        
-    final_metric = total_correct / total_edges
-    print(f"Local Phasing Quotient: {total_correct}/{total_edges} = {final_metric:.3f}")
-    return final_metric
-
-def local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type):
+def local_phasing_quotient(y_true, y_pred, chr, edge_index, edge_type):
     device = y_true.device
     y_true = y_true.to(device)
     y_pred = y_pred.to(device)
@@ -419,146 +417,122 @@ def local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type):
     print(f"Local Phasing Quotient: {total_correct}/{total_edges} = {final_metric:.3f}")
     return final_metric
 
-
-def train(model, data_path, train_selection, valid_selection, device, config):
+def train(model, data_path, train_selection, valid_selection, device, config, diploid=False, symmetry=False, aux=False, quick=False, dr_loss=True):
     best_valid_loss = 10000
     overfit = not bool(valid_selection)
 
     hamming_loss = HammingLoss().to(device)
-    switch_loss = SwitchLoss().to(device)
+    #switch_loss = SwitchLoss().to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
-    #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=config['decay'], patience=config['patience'], verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=config['decay'], patience=config['patience'], verbose=True)
 
     time_start = datetime.now()
     with wandb.init(project=wandb_project, config=config, mode=config['wandb_mode'], name=run_name):
 
         for epoch in range(config['num_epochs']):
-            print(f"Epoch {epoch} of {config['num_epochs']}")
-            # Training phase
             print('===> TRAINING')
             model.train()
             random.shuffle(train_selection)
-            train_metrics = train_epoch(model, train_selection, data_path, device, optimizer, 
-                                      hamming_loss, switch_loss, config, epoch)
+            train_loss = []
+            pred_mean, pred_std, global_phasing_train, local_phasing_train = [], [], [], []
 
-            # Validation phase (if applicable)
-            valid_metrics = {}
+            for idx, graph_name in enumerate(train_selection):
+                if idx == 0:
+                    g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
+                    g = g.to(device)
+
+                yak_predictions = model(g).squeeze()
+                pred_mean.append(yak_predictions.mean().item())
+                pred_std.append(yak_predictions.std().item())
+
+                # Assume you have a PyG graph 'g'
+                # src and dst correspond to the rows in edge_index
+                src = g.edge_index[0]  # Source nodes
+                dst = g.edge_index[1]  # Destination nodes
+                y = g.y
+                chr = g.chr
+                optimizer.zero_grad()
+                loss_1 = hamming_loss(y, yak_predictions, src, dst, chr)
+                #loss_2 = switch_loss(y, yak_predictions, src, dst, g, chr)
+                #print(loss_1, loss_2)
+                loss = loss_1
+                loss.backward()
+                train_loss.append(loss.item())
+                global_phasing_train.append(global_phasing_quotient(y, yak_predictions, chr))
+                local_phasing_train.append(local_phasing_quotient(y, yak_predictions, chr, g.edge_index, g.edge_type))
+                optimizer.step()
+
+                elapsed = datetime.now() - time_start
+
+                print(f'\nTRAINING (one training graph): Epoch = {epoch}, Graph = {idx}, Loss = {loss.item()}, Elapsed Time = {elapsed}')
+
             if not overfit:
                 print('===> VALIDATION')
                 model.eval()
-                valid_metrics = validate_epoch(model, valid_selection, data_path, device,
-                                            hamming_loss, switch_loss, config, epoch)
-                #scheduler.step(valid_metrics['valid_loss'])
+                valid_loss, valid_pred_mean, valid_pred_std, valid_global_phasing, valid_local_phasing = [], [], [], [], []
                 
-                if valid_metrics['valid_loss'] < best_valid_loss:
-                    best_valid_loss = valid_metrics['valid_loss']
+                with torch.no_grad():
+                    for idx, graph_name in enumerate(valid_selection):
+                        if idx == 0:
+                            g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
+                            g = g.to(device)
+
+                        yak_predictions = model(g).squeeze()
+                        valid_pred_mean.append(yak_predictions.mean().item())
+                        valid_pred_std.append(yak_predictions.std().item())
+
+                        # Assume you have a PyG graph 'g'
+                        # src and dst correspond to the rows in edge_index
+                        src = g.edge_index[0]  # Source nodes
+                        dst = g.edge_index[1]  # Destination nodes
+                        y = g.y
+                        chr = g.chr
+                        edge_index = g.edge_index
+                        edge_type = g.edge_type
+                        valid_loss.append(loss_1.item())
+                        valid_global_phasing.append(global_phasing_quotient(y, yak_predictions, chr))
+                        valid_local_phasing.append(local_phasing_quotient(y, yak_predictions, chr, edge_index, edge_type))
+
+            print(f'Completed Epoch = {epoch}, elapsed time: {elapsed}\n\n')
+            train_loss = np.mean(train_loss)
+            global_phasing_train = np.mean(global_phasing_train)
+            local_phasing_train = np.mean(local_phasing_train)
+
+            if not overfit:
+                valid_loss = np.mean(valid_loss)
+                valid_global_phasing = np.mean(valid_global_phasing)
+                valid_local_phasing = np.mean(valid_local_phasing)
+                scheduler.step(valid_loss)
+                wandb.log({
+                    'train_loss': train_loss, 
+                    'valid_loss': valid_loss, 
+                    'train_global_phasing': global_phasing_train, 
+                    'valid_global_phasing': valid_global_phasing, 
+                    'train_local_phasing': local_phasing_train, 
+                    'valid_local_phasing': valid_local_phasing, 
+                    'mean': np.mean(pred_mean), 
+                    'std': np.mean(pred_std)
+                })
+            
+                if valid_loss < best_valid_loss:
+                    best_valid_loss = valid_loss
                     model_path = os.path.join(save_model_path, f'{args.run_name}_best.pt')
                     torch.save(model.state_dict(), model_path)
                     print("Saved model")
-
-            # Log metrics
-            log_dict = {**train_metrics}
-            if valid_metrics:
-                log_dict.update(valid_metrics)
-            wandb.log(log_dict)
+            else:
+                wandb.log({
+                    'train_loss': train_loss, 
+                    'train_global_phasing': global_phasing_train, 
+                    'train_local_phasing': local_phasing_train, 
+                    'mean': np.mean(pred_mean), 
+                    'std': np.mean(pred_std)
+                })
 
             if (epoch+1) % 10 == 0:
                 model_path = os.path.join(save_model_path, f'{args.run_name}_{epoch+1}.pt')
                 torch.save(model.state_dict(), model_path)
                 print("Saved model")
-
-def train_epoch(model, train_selection, data_path, device, optimizer, 
-                hamming_loss, switch_loss, config, epoch):
-    train_loss = []
-    pred_mean, pred_std = [], []
-    compute_metrics = (epoch % config['compute_metrics_every'] == 0)
-    global_phasing_train, local_phasing_train = [], []
-
-    for idx, graph_name in enumerate(train_selection):
-        print(f"Training graph {graph_name}, id: {idx} of {len(train_selection)}")
-        g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
-
-        optimizer.zero_grad()
-        g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)    
-
-        predictions = model(g).squeeze()
-        
-        pred_mean.append(predictions.mean().item())
-        pred_std.append(predictions.std().item())
-
-        loss_1 = hamming_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
-        if config['alpha'] > 0:
-            loss_2 = switch_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g, g.chr)
-            loss = loss_1 + config['alpha'] * loss_2
-        else:
-            loss = loss_1
-            
-        loss.backward()
-        optimizer.step()
-        train_loss.append(loss.item())
-
-        if compute_metrics:
-            global_phasing_train.append(global_phasing_quotient(g.y, predictions, g.chr))
-            local_phasing_train.append(local_phasing_quotient(g.y, predictions, g.chr, 
-                                                            g.edge_index, g.edge_type))
-
-    metrics = {
-        'train_loss': np.mean(train_loss),
-        'mean': np.mean(pred_mean),
-        'std': np.mean(pred_std)
-    }
-    
-    if compute_metrics:
-        metrics.update({
-            'train_global_phasing': np.mean(global_phasing_train),
-            'train_local_phasing': np.mean(local_phasing_train)
-        })
-    
-    return metrics
-
-def validate_epoch(model, valid_selection, data_path, device, 
-                  hamming_loss, switch_loss, config, epoch):
-    valid_loss = []
-    valid_pred_mean, valid_pred_std = [], []
-    compute_metrics = (epoch % config['compute_metrics_every'] == 0)
-    valid_global_phasing, valid_local_phasing = [], []
-
-    with torch.no_grad():
-        for idx, graph_name in enumerate(valid_selection):
-            print(f"Validating graph {graph_name}, id: {idx} of {len(valid_selection)}")
-            g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
-
-            predictions = model(g).squeeze()
-            valid_pred_mean.append(predictions.mean().item())
-            valid_pred_std.append(predictions.std().item())
-
-            loss_1 = hamming_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
-            if config['alpha'] > 0:
-                loss_2 = switch_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g, g.chr)
-                loss = loss_1 + config['alpha'] * loss_2
-            else:
-                loss = loss_1
-            valid_loss.append(loss.item())
-
-            if compute_metrics:
-                valid_global_phasing.append(global_phasing_quotient(g.y, predictions, g.chr, debug=True))
-                valid_local_phasing.append(local_phasing_quotient(g.y, predictions, g.chr, 
-                                                                g.edge_index, g.edge_type, debug=True))
-
-    metrics = {
-        'valid_loss': np.mean(valid_loss),
-        'valid_mean': np.mean(valid_pred_mean),
-        'valid_std': np.mean(valid_pred_std)
-    }
-    
-    if compute_metrics:
-        metrics.update({
-            'valid_global_phasing': np.mean(valid_global_phasing),
-            'valid_local_phasing': np.mean(valid_local_phasing)
-        })
-    
-    return metrics
 
 if __name__ == '__main__':
 
@@ -594,9 +568,10 @@ if __name__ == '__main__':
     hyper_config = args.hyper_config
     quick = args.quick
     hap_switch = args.hap_switch
-    full_dataset, valid_selection, train_selection = train_utils.create_dataset_dicts(data_config=data_config)
-    train_data = train_utils.get_numbered_graphs(train_selection)
-    valid_data = train_utils.get_numbered_graphs(valid_selection, starting_counts=train_selection)
+
+    full_dataset, valid_selection, train_selection = utils.create_dataset_dicts(data_config=data_config)
+    valid_data = utils.get_numbered_graphs(valid_selection)
+    train_data = utils.get_numbered_graphs(train_selection, starting_counts=valid_selection)
 
     if not os.path.exists(args.save_model_path):
         os.makedirs(args.save_model_path)
@@ -604,9 +579,9 @@ if __name__ == '__main__':
     with open(hyper_config) as file:
         config = yaml.safe_load(file)['training']
 
-    train_utils.set_seed(args.seed)
+    utils.set_seed(args.seed)
    
-    model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers_0=config['num_gnn_layers_overlap'], gnn_num_layers_1=config['num_gnn_layers_hic'], gnn_dropout=config['gnn_dropout']).to(device)
+    model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout']).to(device)
     #model = MultiSGFormer(num_sgformers=3, in_channels=2, hidden_channels=128, out_channels=1, trans_num_layers=2, gnn_num_layers=4, gnn_dropout=0.0).to(device)
 
     #latest change: half hidden channels, reduce gnn_layers, remove dropout
@@ -616,6 +591,6 @@ if __name__ == '__main__':
         model.load_state_dict(torch.load(load_checkpoint, map_location=device))
         print(f"Loaded model from {load_checkpoint}")
 
-    train(model, data_path, train_data, valid_data, device, config)
+    train(model, data_path, train_data, valid_data, device, config, diploid, symmetry, aux, quick = False, dr_loss = not args.bce)
 
     #python train_yak2.py --save_model_path /mnt/sod2-project/csb4/wgs/martin/rl_dgl_datasets/trained_models/ --data_path /mnt/sod2-project/csb4/wgs/martin/diploid_datasets/diploid_dataset_hg002_cent/pyg_graphs/ --data_config dataset_diploid_cent.yml --hyper_config config_yak.yml --wandb pred_yak --run_name yak2_SGformer_base --device cuda:4 --diploid
