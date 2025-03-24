@@ -54,6 +54,13 @@ workflow GRAPHIC{
 
 }
 
+// init for main workflow
+workflow {
+	GRAPHIC(params.input)
+}
+
+
+
 
 ///*
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
