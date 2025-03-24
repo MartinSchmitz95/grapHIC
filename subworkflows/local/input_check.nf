@@ -38,8 +38,7 @@ workflow INPUT_CHECK {
         .collate(2)
         .set { hic_reads }
    }
-	SAMPLESHEET_CHECK ( samplesheet )
-		.csv
+	SAMPLESHEET_CHECK.csv
 	  .splitCsv ( header:true, sep:',' )
 	  //.map { create_fastq_channels(it) }
 	  .map { it -> [it[0], it[1]]}
