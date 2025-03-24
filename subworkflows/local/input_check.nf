@@ -16,15 +16,13 @@ workflow INPUT_CHECK {
         .splitCsv ( header:true, sep:',' )
 	.map { create_fastq_channels(it) }
 	.splitFastq( by: params.fastq_chunks_size, pe:true, file: true, compress:true)
-	.map { it -> [it[0], [it[2], it[3]]]}
+	// group by sample name in meta
+	.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
 	.groupTuple(by: [0])
-        .flatMap { it -> setMetaChunk(it) }
+        .flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
+		  // these last two steps rely on undefined behaviour, I think
+		  // replace with merging explicitly and multimap
         .collate(2)
-	//.map { it ->
-	//  def meta = it[0].clone()
-	//  meta.chunk = it[1].baseName - ~/.fastq(.gz)?/
-	//  return [meta, [it[1], it[2]]]
-	//}
         .set { hic_reads }
 
     } else {
@@ -38,6 +36,7 @@ workflow INPUT_CHECK {
         .collate(2)
         .set { hic_reads }
    }
+
 	SAMPLESHEET_CHECK.csv
 	  .splitCsv ( header:true, sep:',' )
 	  //.map { create_fastq_channels(it) }
@@ -48,7 +47,7 @@ workflow INPUT_CHECK {
 
     emit:
     reads // channel: [ val(meta), [ reads ] ]
-    hic_reads // channel: [ val(meta), [ reads ] ]
+    hic_reads // channel: [ val(meta), [ [reads_1, reads_2] ] ]
 }
 
 // Function to get list of [ meta, [ fastq_1, fastq_2 ] ]
