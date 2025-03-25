@@ -41,7 +41,7 @@ workflow INPUT_CHECK {
 			.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
 			.groupTuple(by: [0])
 			.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
-			.multimap { it ->
+			.multiMap { it ->
 				hic_reads: [it[0], [it[2], it[3]]]
 				reads: [it[0], it[1]]
 				}
