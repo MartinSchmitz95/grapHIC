@@ -21,27 +21,27 @@ workflow GRAPHIC{
 
 	// run hifiasm to get unitigs
 	HIFIASM(
-		//INPUT_CHECK.reads.map { it -> [it[0], it[1].collectFile(), false }, // hifiasm should be able to handle multiple inputs
-		INPUT_CHECK.reads.map { it -> [it[0], it[1], false] },
+		//INPUT_CHECK.out.reads.map { it -> [it[0], it[1].collectFile(), false }, // hifiasm should be able to handle multiple inputs
+		INPUT_CHECK.out.reads.map { it -> [it[0], it[1], false] },
 		false,
 		false
 	)
 
 	// start graph construction already, can run in parallel
-	GFA_TO_GRAPH(HIFIASM.processed_unitigs)
+	GFA_TO_GRAPH(HIFIASM.out.processed_unitigs)
 
-	GFA_TO_FA(HIFIASM.processed_unitigs)
+	GFA_TO_FA(HIFIASM.out.processed_unitigs)
 
 	ch_utigs = GFA_TO_FA.out.fasta
 
 	// align hic reads to unitigs
 	HIC(
 		ch_utigs.map { it -> it[1] },
-		INPUT_CHECK.hic_reads.map { it -> [it[1], it[2]] }
+		INPUT_CHECK.out.hic_reads.map { it -> [it[1], it[2]] }
 	)
 
 	// transform to graph structure
-	MAKE_HIC_EDGES(HIC.cool, GFA_TO_GRAPH.utg_graph, GFA_TO_GRAPH.utg)
+	MAKE_HIC_EDGES(HIC.out.cool, GFA_TO_GRAPH.out.utg_graph, GFA_TO_GRAPH.out.utg)
 
 	// merge graphs
 
