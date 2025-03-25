@@ -20,9 +20,10 @@ workflow INPUT_CHECK {
 			.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
 			.groupTuple(by: [0])
 			.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
-			.multimap { it ->
-				hic_reads: [it[0], [it[2], it[3]]]
-				reads: [it[0], it[1]]
+			.multiMap {
+				it ->
+					hic_reads: [it[0], [it[2], it[3]]]
+					reads: [it[0], it[1]]
 				}
 			.set { merged_in }
 
@@ -41,16 +42,17 @@ workflow INPUT_CHECK {
 			.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
 			.groupTuple(by: [0])
 			.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
-			.multiMap { it ->
-				hic_reads: [it[0], [it[2], it[3]]]
-				reads: [it[0], it[1]]
+			.multiMap {
+				it ->
+					hic_reads: [it[0], [it[2], it[3]]]
+					reads: [it[0], it[1]]
 				}
 			.set { merged_in }
    }
 
 	// export as output
-	merged_in.hic_reads.set{ hic_reads}
-	merged_in.reads.set{ reads}
+	merged_in.hic_reads.set{ hic_reads }
+	merged_in.reads.set{ reads }
 
     emit:
     reads // channel: [ val(meta), [ reads ] ]
