@@ -17,32 +17,19 @@ workflow PREPARE_GENOME {
 
   //***************************************
   // Bowtie Index
-  if(!params.bwt2_index){
-    BOWTIE2_BUILD (
-      fasta
-    )
-    ch_index = BOWTIE2_BUILD.out.index
-    ch_versions = ch_versions.mix(BOWTIE2_BUILD.out.versions)
-  }else{
-    Channel.fromPath( params.bwt2_index , checkIfExists: true)
-           .map { it -> [[:], it]}
-           .ifEmpty { exit 1, "Genome index: Provided index not found: ${params.bwt2_index}" }
-           .set { ch_index }
-  }
+  BOWTIE2_BUILD (
+    fasta
+  )
+  ch_index = BOWTIE2_BUILD.out.index
+  ch_versions = ch_versions.mix(BOWTIE2_BUILD.out.versions)
 
   //***************************************
   // Chromosome size
-  if(!params.chromosome_size){
-    CUSTOM_GETCHROMSIZES(
-      fasta
-    )
-    ch_chromsize = CUSTOM_GETCHROMSIZES.out.sizes
-    ch_versions = ch_versions.mix(CUSTOM_GETCHROMSIZES.out.versions)
-  }else{
-    Channel.fromPath( params.chromosome_size , checkIfExists: true)
-           .map { it -> [[:], it]}
-           .set {ch_chromsize} 
-  }
+  CUSTOM_GETCHROMSIZES(
+    fasta
+  )
+  ch_chromsize = CUSTOM_GETCHROMSIZES.out.sizes
+  ch_versions = ch_versions.mix(CUSTOM_GETCHROMSIZES.out.versions)
 
   //***************************************
   // Restriction fragments
