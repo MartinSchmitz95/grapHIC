@@ -6,7 +6,6 @@ process GFA_TO_GRAPH {
 
     input:
     tuple val(meta), path(gfa)
-    tuple path(gfa)
 
     output:
     tuple val(meta), path("*.nx.pkl"), emit: utg_graph
