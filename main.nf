@@ -8,6 +8,7 @@ include { HIC            } from './workflows/hic'
 include { INPUT_CHECK    } from './subworkflows/local/input_check'
 include { GFA_TO_GRAPH   } from './modules/local/gfa_to_graph'
 include { MAKE_HIC_EDGES } from './modules/local/descongelador'
+include { HIFASM         } from './modules/nf-core/hifiasm'
 
 
 workflow GRAPHIC{
