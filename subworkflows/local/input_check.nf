@@ -11,8 +11,7 @@ workflow INPUT_CHECK {
     main:
     if (params.split_fastq){
 
-      SAMPLESHEET_CHECK ( samplesheet )
-			.csv
+      SAMPLESHEET_CHECK ( samplesheet ).out.csv
 			.splitCsv ( header:true, sep:',' )
 			.map { create_fastq_channels(it) }
 			.splitFastq( by: params.fastq_chunks_size, pe:true, file: true, compress:true)
@@ -34,8 +33,7 @@ workflow INPUT_CHECK {
 
 
     } else {
-      SAMPLESHEET_CHECK ( samplesheet )
-			.csv
+      SAMPLESHEET_CHECK ( samplesheet ).out.csv
 			.splitCsv ( header:true, sep:',' )
 			.map { create_fastq_channels(it) }
 			// group by sample name in meta
