@@ -114,9 +114,8 @@ workflow HIC {
   //
   // SUB-WORFLOW: HiC-Pro
   //
-  INPUT_CHECK.out.reads.view()
   HICPRO (
-    INPUT_CHECK.out.reads,
+    ch_hic_reads,
     PREPARE_GENOME.out.index,
     PREPARE_GENOME.out.res_frag,
     PREPARE_GENOME.out.chromosome_size,
