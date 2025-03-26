@@ -128,7 +128,8 @@ workflow HIC {
   //
   COOLER (
     HICPRO.out.pairs,
-    PREPARE_GENOME.out.chromosome_size
+    PREPARE_GENOME.out.chromosome_size,
+	 Channel.of( 1000000000 ) // zoom out as much as possible
   )
   ch_versions = ch_versions.mix(COOLER.out.versions)
 
