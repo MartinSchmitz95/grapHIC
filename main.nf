@@ -58,7 +58,7 @@ workflow GRAPHIC{
 
 // init for main workflow
 workflow {
-	GRAPHIC(params.input)
+	GRAPHIC(file(params.input))
 }
 
 
