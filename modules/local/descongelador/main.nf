@@ -5,9 +5,9 @@ process MAKE_HIC_EDGES {
     conda "${moduleDir}/env_desc.yml"
 
     input:
-    tuple path(hic_contacts)
-    tuple path(ov_graph)
-    tuple path(utg_dict)
+    path(hic_contacts)
+    path(ov_graph)
+    path(utg_dict)
 
     output:
     tuple val(meta), path("*.nx.pkl"), emit: graph
