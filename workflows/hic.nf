@@ -184,6 +184,6 @@ workflow HIC {
 
   emit:
   versions = ch_versions
-  cool = COOL.out.cool
+  cool = COOLER.out.cool
   //multiqc_report = multiqc_report
 }
