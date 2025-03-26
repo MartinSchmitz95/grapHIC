@@ -18,11 +18,11 @@ process GFA_TO_FA {
 	 def compress = true
     def write_output = compress ? "| gzip > ${prefix}.fa.gzs" : "> ${prefix}.fa"
     """
-	 awk '/^S/{print \">\"$2;print $3}' ${gfa} ${write_output}
+	 awk '/^S/{print \">\"\$2;print \$3}' ${gfa} ${write_output}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        awk: \$( awk --version | head -n 1 | sed -e "s/,.*$//g" )
+        awk: \$( awk --version | head -n 1 | sed -e "s/,.*\$//g" )
     END_VERSIONS
     """
 }
