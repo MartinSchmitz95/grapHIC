@@ -37,7 +37,7 @@ def nx_from_gfa(gfa_path, diploid=False):
     unitig_2_node = {}
     utg_2_reads = {}
     #edges_dict = {}
-    read_lengths, read_seqs = {}, {}  # Obtained from the GFA
+    read_lengths, read_seqs, covs = {}, {}  # Obtained from the GFA
     read_idxs, read_strands, read_starts, read_ends, read_chrs, read_variants, variant_class = {}, {}, {}, {}, {}, {}, {}  # Obtained from the FASTA/Q headers
     edge_ids, prefix_lengths, overlap_lengths, overlap_similarities = {}, {}, {}, {}
 
@@ -61,7 +61,6 @@ def nx_from_gfa(gfa_path, diploid=False):
                 old_read_to_utg[line[4]] = line[1]
 
             if line[0] == 'S':
-                #TODO write cov as attribute into nx graph
                 if len(line) == 6:
                     tag, id, sequence, length, count, cov = line
                 if len(line) == 5:
@@ -88,6 +87,9 @@ def nx_from_gfa(gfa_path, diploid=False):
 
                 read_lengths[real_idx] = length
                 read_lengths[virt_idx] = length
+
+                covs[real_idx] = cov
+                covs[virt_idx] = cov
 
                 if id.startswith('utg'):
                     # Store the original unitig ID before it gets modified
@@ -200,7 +202,8 @@ def nx_from_gfa(gfa_path, diploid=False):
 
     nx.set_node_attributes(graph_nx, read_lengths, 'read_length')
     nx.set_node_attributes(graph_nx, variant_class, 'variant_class')
-    node_attrs = ['read_length', 'variant_class']
+    nx.set_node_attributes(graph_nx, covs, 'cov')
+    node_attrs = ['read_length', 'variant_class', 'cov']
 
     return graph_nx, read_seqs, unitig_2_node, utg_2_reads
 
