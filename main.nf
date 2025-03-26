@@ -7,6 +7,7 @@ nextflow.enable.dsl = 2
 include { HIC            } from './workflows/hic'
 include { INPUT_CHECK    } from './subworkflows/local/input_check'
 include { GFA_TO_GRAPH   } from './modules/local/gfa_to_graph'
+include { GFA_TO_GRAPH   } from './modules/local/gfa_to_fa'
 include { MAKE_HIC_EDGES } from './modules/local/descongelador'
 include { HIFIASM         } from './modules/nf-core/hifiasm'
 
