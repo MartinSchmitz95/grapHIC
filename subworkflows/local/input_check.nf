@@ -66,17 +66,17 @@ def create_fastq_channels(LinkedHashMap row) {
   meta.single_end = false
 
   def array = []
-  if (!file(row.fastq_1).exists() & file(row.fastq_2).exists()) {
-    exit 1, "ERROR: Please check input samplesheet -> Read 1 FastQ file does not exist!\n${row.fastq_1}"
+  if (!file(row.hic_reads1).exists() & file(row.hic_reads2).exists()) {
+    exit 1, "ERROR: Please check input samplesheet -> Read 1 FastQ file does not exist!\n${row.hic_reads1}"
   }
-  if (!file(row.fastq_2).exists() & file(row.fastq_1).exists()) {
-    exit 1, "ERROR: Please check input samplesheet -> Read 2 FastQ file does not exist!\n${row.fastq_2}"
+  if (!file(row.hic_reads2).exists() & file(row.hic_reads1).exists()) {
+    exit 1, "ERROR: Please check input samplesheet -> Read 2 FastQ file does not exist!\n${row.hic_reads2}"
   }
   // in case there are only regular reads given as input
-  if (!file(row.fastq_1).exists() & !file(row.fastq_2).exists()) {
+  if (!file(row.hic_reads1).exists() & !file(row.hic_reads2).exists()) {
 	  return []
   }
-  array = [ meta, file(row.reads), file(row.fastq_1), file(row.fastq_2) ]
+  array = [ meta, file(row.reads), file(row.hic_reads1), file(row.hic_reads2) ]
   return array
 }
 

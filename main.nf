@@ -58,6 +58,7 @@ workflow GRAPHIC{
 
 // init for main workflow
 workflow {
+	print(params.input)
 	GRAPHIC(file(params.input))
 }
 
