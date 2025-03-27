@@ -14,7 +14,7 @@ take:
 			SAMPLESHEET_CHECK ( samplesheet )
 				.csv
 				.splitCsv ( header:true, sep:',' )
-				.map { create_fastq_channels(it) }
+				.map { it -> create_fastq_channels(it) }
 				.splitFastq( by: params.fastq_chunks_size, pe:true, file: true, compress:true)
 				// group by sample name in meta
 				.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
@@ -37,7 +37,7 @@ take:
 			SAMPLESHEET_CHECK ( samplesheet )
 				.csv
 				.splitCsv ( header:true, sep:',' )
-				.map { create_fastq_channels(it) }
+				.map { it -> create_fastq_channels(it) }
 				// group by sample name in meta
 				.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
 				.groupTuple(by: [0])
@@ -53,6 +53,9 @@ take:
 	// export as output
 	merged_in.hic_reads.set{ hic_reads }
 	merged_in.reads.set{ reads }
+
+	reads.view()
+	hic_reads.view()
 
 emit:
 	reads // channel: [ val(meta), [ reads ] ]
