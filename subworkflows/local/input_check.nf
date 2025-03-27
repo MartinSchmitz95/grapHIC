@@ -65,7 +65,7 @@ emit:
 // Function to get list of [ meta, [ reads, hic1, hic2 ] ]
 def create_fastq_channels(LinkedHashMap row) {
 	def meta = [:]
-	meta.id = row.sample
+	meta.id = row.id
 	meta.single_end = false
 
 	def reads = Channel.of()
