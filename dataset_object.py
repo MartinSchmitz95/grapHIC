@@ -1551,6 +1551,117 @@ class HicDatasetCreator:
             print(f"Error running pileup.sh: {e}")
             raise
 
+    def split_and_save_pyg(self, nx_graph, index):
+        """
+        Splits the graph by chromosome and saves each as a separate PyG graph.
+        Omits node features (x) and focuses only on the graph structure.
+        Names each graph according to its chromosome.
+        """
+        print()
+        print(f"Total nodes in graph: {nx_graph.number_of_nodes()}")
+        # Assert that nx_graph is a multigraph
+        assert isinstance(nx_graph, nx.MultiGraph) or isinstance(nx_graph, nx.MultiDiGraph), "Graph must be a NetworkX MultiGraph or MultiDiGraph"
+        
+        # Get all unique chromosomes in the graph
+        chr_values = set()
+        for node in nx_graph.nodes():
+            chr_values.add(nx_graph.nodes[node]['read_chr'])
+        
+        print(f"Found {len(chr_values)} unique chromosomes: {sorted(chr_values)}")
+        
+        # Process each chromosome separately
+        for chr_id in sorted(chr_values):
+            # Get nodes for this chromosome
+            chr_nodes = [node for node in nx_graph.nodes() if nx_graph.nodes[node]['read_chr'] == chr_id]
+            
+            if not chr_nodes:
+                continue
+                
+            # Create subgraph for this chromosome
+            chr_subgraph = nx_graph.subgraph(chr_nodes).copy()
+            
+            # Get number of nodes in this subgraph
+            num_nodes = chr_subgraph.number_of_nodes()
+            
+            # Create a mapping from original node IDs to consecutive indices
+            node_mapping = {old_id: new_id for new_id, old_id in enumerate(chr_subgraph.nodes())}
+            
+            # Initialize lists for edges, types and weights
+            edge_list = []
+            edge_types = []
+            edge_weights = []
+            
+            # Process each edge type
+            edge_type_map = {'overlap': 0, 'hic': 1}
+            
+            # Convert edges for each type
+            for (u, v, key, data) in chr_subgraph.edges(data=True, keys=True):
+                edge_type = data.get('type')  # Get edge type
+                # Ensure edge_type is a string
+                if isinstance(edge_type, list):
+                    edge_type = edge_type[0]  # Take first element if it's a list
+                elif edge_type is None:
+                    continue  # Skip edges with no type
+                
+                if edge_type not in edge_type_map:
+                    continue  # Skip unknown edge types
+                    
+                # Map node IDs to new consecutive indices
+                new_u = node_mapping[u]
+                new_v = node_mapping[v]
+                
+                edge_list.append([new_u, new_v])
+                edge_types.append(edge_type_map[edge_type])
+                edge_weights.append(data.get('weight', 1.0))  # Default weight to 1.0 if not found
+            
+            if not edge_list:
+                print(f"No edges found for chromosome {chr_id}, skipping")
+                continue
+                
+            # Convert to tensors
+            edge_index = torch.tensor(edge_list, dtype=torch.long).t()
+            edge_type = torch.tensor(edge_types, dtype=torch.long)
+            edge_weight = torch.tensor(edge_weights, dtype=torch.float)
+            
+            # Z-score normalize edge weights separately for each type
+            for type_idx in range(len(edge_type_map)):
+                # Create mask for current edge type
+                type_mask = edge_type == type_idx
+                
+                if not torch.any(type_mask):
+                    continue
+                
+                # Get weights for current type
+                type_weights = edge_weight[type_mask]
+                
+                # Compute mean and std for current type
+                type_mean = torch.mean(type_weights)
+                type_std = torch.std(type_weights)
+                
+                # Normalize weights for current type if std is not 0
+                if type_std != 0:
+                    edge_weight[type_mask] = (type_weights - type_mean) / type_std
+            
+            # Extract ground truth haplotype labels
+            gt_hap = [chr_subgraph.nodes[node]['gt_hap'] for node in chr_subgraph.nodes()]
+            gt_tensor = torch.tensor(gt_hap, dtype=torch.long)
+            
+            # Create PyG Data object without node features
+            pyg_data = Data(
+                edge_index=edge_index,
+                edge_type=edge_type,
+                edge_weight=edge_weight,
+                y=gt_tensor
+            )
+            
+            # Format chromosome ID for filename (remove 'chr' prefix if present)
+            chr_name = chr_id.replace('chr', '')
+            
+            # Save PyG graph
+            pyg_file = os.path.join(self.pyg_graphs_path, f'chr{chr_name}_{index}.pt')
+            torch.save(pyg_data, pyg_file)
+            print(f"Saved PyG graph for chromosome {chr_id} with {num_nodes} nodes and {len(edge_list)} edges to {pyg_file}")
+
 #################################################
 ####### Welcome to the Code Graveyard X.X #######
 #################################################

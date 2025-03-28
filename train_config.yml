@@ -4,9 +4,10 @@ training:
   num_gnn_layers_overlap: 8
   num_gnn_layers_hic: 8
   num_trans_layers: 3
-  hidden_features: 256
-  emb_dim: 256
-  node_features: 20
+  hidden_features: 512
+  emb_dim: 128
+  projection_dim: 16
+  node_features: 1
   gnn_dropout: 0.0
   lr: 0.0001
   wandb_mode: 'online'

@@ -14,7 +14,7 @@ import yaml
 #from torch_geometric.utils import to_undirected
 import torch_geometric.transforms as T
 from SGformer_C2 import SGFormerC2
-from contrastive_loss import MultiLabelConLoss, ConLoss, SupervisedContrastiveLoss, MultiDimHammingLoss, adaptive_clustering_loss
+from contrastive_loss import MultiLabelConLoss, ConLoss, SupervisedContrastiveLoss, MultiDimHammingLoss, adaptive_clustering_loss, multi_adaptive_clustering_loss
 import copy
 from ClusterGCN import ClusterGCN
 
@@ -217,7 +217,7 @@ def train(model, data_path, train_selection, valid_selection, device, config):
                 valid_metrics = validate_epoch(model, valid_selection, data_path, device,
                                             config, phasing_loss, scaffolding_loss)
                 
-                scheduler.step(valid_metrics['valid_loss'])  # Use total loss for scheduler
+                #scheduler.step(valid_metrics['valid_loss'])  # Use total loss for scheduler
                 
                 # Save model with lowest validation loss
                 if valid_metrics['valid_loss'] < best_valid_loss:
@@ -266,8 +266,9 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
         #torch.save(g, os.path.join(data_path, graph_name + '.pt'))
         # Now concatenate the tensors
         
-        #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
         g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
+        #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
+
         #torch.save(g, os.path.join(data_path, graph_name + '.pt'))
         optimizer.zero_grad()
         chr_labels = g.chr.int().to(device)
@@ -323,7 +324,8 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
             sampled_hap_labels = g.hap_gt[sampled_indices].to(device)
             
             # Compute phasing loss
-            phasing_batch_loss = phasing_loss(sampled_phasing_projections, sampled_hap_labels)
+            #phasing_batch_loss = phasing_loss(sampled_phasing_projections, sampled_hap_labels)
+            phasing_batch_loss = multi_adaptive_clustering_loss(sampled_phasing_projections, sampled_hap_labels, g.edge_index)
             
             train_phasing_loss.append(phasing_batch_loss.item())
         
@@ -379,7 +381,9 @@ def validate_epoch(model, valid_selection, data_path, device,
             
             # Preprocess graph
             g, labels = preprocess_graph(g, device)"""
-            
+            g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
+            #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
+
             # Get embeddings for all nodes
             _, _, phasing_projections, scaffolding_projections = model(g)
             
@@ -395,11 +399,11 @@ def validate_epoch(model, valid_selection, data_path, device,
                     sampled_scaffolding_projections = scaffolding_projections[indices]
                     sampled_labels = g.chr[indices].to(device)
                     
-                    # Compute loss on the sampled batch
-                    scaffolding_batch_loss = scaffolding_loss(sampled_scaffolding_projections, sampled_labels)
+                    # Use the same loss function as in training
+                    scaffolding_batch_loss = adaptive_clustering_loss(sampled_scaffolding_projections, sampled_labels, g.edge_index)
                 else:
                     # If we have fewer nodes than batch_size, use all nodes
-                    scaffolding_batch_loss = scaffolding_loss(scaffolding_projections, g.chr.to(device))
+                    scaffolding_batch_loss = adaptive_clustering_loss(scaffolding_projections, g.chr.to(device), g.edge_index)
                 
                 valid_scaffolding_loss.append(scaffolding_batch_loss.item())
             
@@ -428,7 +432,8 @@ def validate_epoch(model, valid_selection, data_path, device,
                 sampled_hap_labels = g.hap_gt[sampled_indices].to(device)
                 
                 # Compute phasing loss
-                phasing_batch_loss = phasing_loss(sampled_phasing_projections, sampled_hap_labels)
+                #phasing_batch_loss = phasing_loss(sampled_phasing_projections, sampled_hap_labels)
+                phasing_batch_loss = multi_adaptive_clustering_loss(sampled_phasing_projections, sampled_hap_labels, g.edge_index)
                 
                 valid_phasing_loss.append(phasing_batch_loss.item())
             
@@ -494,8 +499,8 @@ def evaluate_embeddings(model, data_path, eval_selection, device):
             
             # Preprocess graph
             g, _ = preprocess_graph(g, device)"""
-            #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)    
             g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
+            #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
 
             # Get embeddings
             phasing_embs, scaffolding_embs, _, _ = model(g)  # This returns a tuple
@@ -682,8 +687,9 @@ def visualize_embeddings(model, data_path, graph_name, device, output_dir='embed
         
         # Preprocess graph
         g, _ = preprocess_graph(g, device)"""
+        g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
         g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
-        
+
         # Get embeddings
         phasing_embs, scaffolding_embs, phasing_projections, scaffolding_projections = model(g)  # This returns a tuple
         
@@ -790,7 +796,7 @@ if __name__ == '__main__':
         gnn_dropout= 0, #config['gnn_dropout'],
     ).to(device)"""
 
-    model = ClusterGCN(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=config['emb_dim'], num_layers=config['num_gnn_layers_overlap']).to(device)
+    model = ClusterGCN(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=config['emb_dim'], num_layers=config['num_gnn_layers_overlap'], dropout=config['gnn_dropout']).to(device)
     to_undirected = False
     model.to(device)
     if load_checkpoint:
