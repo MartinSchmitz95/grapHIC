@@ -54,19 +54,19 @@ take:
 	// export as output
 	merged_in.reads.flatMap { it -> 
 			def map = []
-			it[1].eachWithIndex() { file,i ->
-				meta = row[0].clone()
+			it[1].eachWithIndex() { tup,i ->
+				meta = tup[0].clone()
 				meta.chunk = i
-				map += [meta, file]
+				map += [meta, tup[1]]
 				}
 		}.set{ reads }
 
 	merged_in.hic_reads.flatMap { it -> 
 			def map = []
 			it[1].eachWithIndex() { tup,i ->
-				meta = row[0].clone()
+				meta = tup[0].clone()
 				meta.chunk = i
-				map += [meta, tup]
+				map += [meta, tup[1]]
 				}
 		}.set{ hic_reads }
 
