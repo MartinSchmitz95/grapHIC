@@ -58,6 +58,7 @@ take:
 				meta = row[0].clone()
 				meta.chunk = i
 				map += [meta, file]
+				}
 		}.set{ reads }
 
 	merged_in.hic_reads.flatMap { it -> 
@@ -66,6 +67,7 @@ take:
 				meta = row[0].clone()
 				meta.chunk = i
 				map += [meta, tup]
+				}
 		}.set{ hic_reads }
 
 	reads.view()
