@@ -40,19 +40,33 @@ take:
 				.map { it -> create_fastq_channels(it) }
 				// group by sample name in meta
 				.map { it -> [it[0], [it[1], [it[2], it[3]]]] }
-				.groupTuple(by: [0]).view()
-				.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
+				.groupTuple(by: [0])
+				// do separately for normal & hic reads
+				//.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
 				.multiMap {
 					it ->
-						hic_reads: [it[0], [it[2], it[3]]]
 						reads: [it[0], it[1]]
+						hic_reads: [it[0], it[2]]//[it[2], it[3]]]
 				}
 				.set { merged_in }
 		}
 
 	// export as output
-	merged_in.hic_reads.set{ hic_reads }
-	merged_in.reads.set{ reads }
+	merged_in.reads.flatMap { it -> 
+			def map = []
+			it[1].eachWithIndex() { file,i ->
+				meta = row[0].clone()
+				meta.chunk = i
+				map += [meta, file]
+		}.set{ reads }
+
+	merged_in.hic_reads.flatMap { it -> 
+			def map = []
+			it[1].eachWithIndex() { tup,i ->
+				meta = row[0].clone()
+				meta.chunk = i
+				map += [meta, tup]
+		}.set{ hic_reads }
 
 	reads.view()
 	hic_reads.view()
@@ -111,15 +125,4 @@ def create_fastq_channels(LinkedHashMap row) {
 
 	array = [ meta, reads, hic_reads1, hic_reads2 ]
 	return array
-}
-
-// Set the meta.chunk value in case of technical replicates
-def setMetaChunk(row){
-	def map = []
-	row[1].eachWithIndex() { file,i ->
-		meta = row[0].clone()
-		meta.chunk = i
-		map += [meta, file]
-	}
-	return map
 }
