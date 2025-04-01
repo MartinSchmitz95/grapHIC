@@ -50,7 +50,7 @@ take:
 						// filter twice to filter out [null, null] tuples
 						// shouldn't occur anymore, but still nicer to have
 						hic_reads: [it[0], it[1].collect{ i -> i[1] }.findAll{
-								j -> (j) & ((j[0] as Boolean) & (j[1] as Boolean))
+								j -> (j) && ((j[0] as Boolean) && (j[1] as Boolean))
 								}.collect()] //[it[2], it[3]]]
 				}
 				.set { merged_in }
@@ -114,7 +114,7 @@ def create_fastq_channels(LinkedHashMap row) {
 		error = true
 	}
 
-	if ((row.hic_reads1) | (row.hic_reads2)) {
+	if ((row.hic_reads1) || (row.hic_reads2)) {
 		hic_reads1 = file(row.hic_reads1)
 		if (!hic_reads1.exists()){
 			print("ERROR: Please check input samplesheet -> Reads file does not exist!\n${row.hic_reads1}")
