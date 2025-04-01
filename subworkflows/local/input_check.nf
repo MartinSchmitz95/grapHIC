@@ -46,10 +46,12 @@ take:
 				.multiMap {
 					it ->
 						// filter() should remove null values
-						reads:     [it[0], it[1].collect{ i -> i[0] }.findAll{j -> (j)}.collect()]
+						reads:     [it[0], it[1].collect{ i -> i[0] }.findAll{ j -> (j) }.collect()]
 						// filter twice to filter out [null, null] tuples
 						// shouldn't occur anymore, but still nicer to have
-						hic_reads: [it[0], it[1].collect{ i -> i[1] }.findAll{j -> (j) and ((j[0]) & (j[1]))}.collect()] //[it[2], it[3]]]
+						hic_reads: [it[0], it[1].collect{ i -> i[1] }.findAll{
+								j -> (j) & ((j[0] as Boolean) & (j[1] as Boolean))
+								}.collect()] //[it[2], it[3]]]
 				}
 				.set { merged_in }
 		}
