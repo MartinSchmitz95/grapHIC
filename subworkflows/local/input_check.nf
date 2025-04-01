@@ -45,8 +45,9 @@ take:
 				//.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
 				.multiMap {
 					it ->
-						reads: [it[0], it[1]]
-						hic_reads: [it[0], it[2]]//[it[2], it[3]]]
+						// filter() should remove null values
+						reads:     [it[0], it[1].map{ it -> it[0] }.filter().toList()]
+						hic_reads: [it[0], it[1].map{ it -> it[1] }.filter().toList()] //[it[2], it[3]]]
 				}
 				.set { merged_in }
 		}
