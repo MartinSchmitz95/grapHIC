@@ -39,7 +39,7 @@ take:
 				.splitCsv ( header:true, sep:',' )
 				.map { it -> create_fastq_channels(it) }
 				// group by sample name in meta
-				.map { it -> [it[0], [it[1], [it[2], it[3]]]] }
+				.map { it -> [it[0], [it[1], it[2]]] }
 				.groupTuple(by: [0])
 				// do separately for normal & hic reads
 				//.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
