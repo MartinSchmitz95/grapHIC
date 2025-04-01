@@ -46,8 +46,10 @@ take:
 				.multiMap {
 					it ->
 						// filter() should remove null values
-						reads:     [it[0], it[1].collect{ i -> i[0] }.findAll{j -> j as Boolean}.collect()]
-						hic_reads: [it[0], it[1].collect{ i -> i[1] }.findAll{j -> j as Boolean}.collect()] //[it[2], it[3]]]
+						reads:     [it[0], it[1].collect{ i -> i[0] }.findAll{j -> (j)}.collect()]
+						// filter twice to filter out [null, null] tuples
+						// shouldn't occur anymore, but still nicer to have
+						hic_reads: [it[0], it[1].collect{ i -> i[1] }.findAll{j -> (j) and ((j[0]) & (j[1]))}.collect()] //[it[2], it[3]]]
 				}
 				.set { merged_in }
 		}
@@ -88,9 +90,10 @@ def create_fastq_channels(LinkedHashMap row) {
 	meta.id = row.id
 	meta.single_end = false
 
-	def reads = Channel.of()
-	def hic_reads1 = Channel.of()
-	def hic_reads2 = Channel.of()
+	def reads = null //Channel.of()
+	def hic_tup = null //Channel.of()
+	//def hic_reads1 = null //Channel.of()
+	//def hic_reads2 = null //Channel.of()
 
 	def error = false // store error state and die at the end, so all errors get reported at once
 
@@ -109,26 +112,29 @@ def create_fastq_channels(LinkedHashMap row) {
 		error = true
 	}
 
-	if (row.hic_reads1) {
+	if (row.hic_reads1) | (row.hic_reads2) {
 		hic_reads1 = file(row.hic_reads1)
 		if (!hic_reads1.exists()){
 			print("ERROR: Please check input samplesheet -> Reads file does not exist!\n${row.hic_reads1}")
 			error = true
 		}
-	}
 
-	if (row.hic_reads2) {
 		hic_reads2 = file(row.hic_reads2)
 		if (!hic_reads2.exists()){
 			print("ERROR: Please check input samplesheet -> Reads file does not exist!\n${row.hic_reads2}")
 			error = true
 		}
+		
+		if (hic_reads1.exists() & hic_reads2.exists()) {
+			hic_tup = [hic_reads1, hic_reads2]
+		}
+
 	}
 
 	if (error){
 		exit 1, "ERROR: Samplesheet invalid (see above errors)"
 	}
 
-	//println([ meta, reads, hic_reads1, hic_reads2 ])
-	return [ meta, reads, hic_reads1, hic_reads2 ]
+	//println([ meta, reads, hic_tup ])
+	return [ meta, reads, hic_tup ]
 }
