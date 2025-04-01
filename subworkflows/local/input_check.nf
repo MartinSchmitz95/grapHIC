@@ -17,13 +17,18 @@ take:
 				.map { it -> create_fastq_channels(it) }
 				.splitFastq( by: params.fastq_chunks_size, pe:true, file: true, compress:true)
 				// group by sample name in meta
-				.map { it -> [it[0], [it[1], [it[2], it[3]]]]}
+				.map { it -> [it[0], [it[1], it[2]]]}
 				.groupTuple(by: [0])
-					.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
+				//.flatMap { it -> setMetaChunk(it) } // puts technical replicates into meta, disaggregates grouped tuples
 				.multiMap {
 					it ->
-						hic_reads: [it[0], [it[2], it[3]]]
-						reads: [it[0], it[1]]
+						// filter() should remove null values
+						reads:     [it[0], it[1].collect{ i -> i[0] }.findAll{ j -> (j) }.collect()]
+						// filter twice to filter out [null, null] tuples
+						// shouldn't occur anymore, but still nicer to have
+						hic_reads: [it[0], it[1].collect{ i -> i[1] }.findAll{
+								j -> (j) && ((j[0]) && (j[1]))
+								}.collect()] //[it[2], it[3]]]
 				}
 				.set { merged_in }
 
