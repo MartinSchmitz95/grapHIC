@@ -46,8 +46,8 @@ take:
 				.multiMap {
 					it ->
 						// filter() should remove null values
-						reads:     [it[0], it[1].map{ it -> it[0] }.filter().toList()]
-						hic_reads: [it[0], it[1].map{ it -> it[1] }.filter().toList()] //[it[2], it[3]]]
+						reads:     [it[0], it[1].map{ i -> i[0] }.filter().toList()]
+						hic_reads: [it[0], it[1].map{ i -> i[1] }.filter().toList()] //[it[2], it[3]]]
 				}
 				.set { merged_in }
 		}
