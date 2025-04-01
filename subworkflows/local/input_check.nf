@@ -67,6 +67,7 @@ take:
 				meta.chunk = i
 				map += [meta, tup[1]]
 				}
+			map
 		}.set{ reads }
 
 	merged_in.hic_reads.flatMap { it -> 
@@ -76,6 +77,7 @@ take:
 				meta.chunk = i
 				map += [meta, tup[1]]
 				}
+			map
 		}.set{ hic_reads }
 
 	reads.view()
