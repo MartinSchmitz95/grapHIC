@@ -126,6 +126,6 @@ def create_fastq_channels(LinkedHashMap row) {
 		exit 1, "ERROR: Samplesheet invalid (see above errors)"
 	}
 
-	array = [ meta, reads, hic_reads1, hic_reads2 ]
-	return array
+	//println([ meta, reads, hic_reads1, hic_reads2 ])
+	return [ meta, reads, hic_reads1, hic_reads2 ]
 }
