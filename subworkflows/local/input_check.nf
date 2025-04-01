@@ -112,7 +112,7 @@ def create_fastq_channels(LinkedHashMap row) {
 		error = true
 	}
 
-	if (row.hic_reads1) | (row.hic_reads2) {
+	if ((row.hic_reads1) | (row.hic_reads2)) {
 		hic_reads1 = file(row.hic_reads1)
 		if (!hic_reads1.exists()){
 			print("ERROR: Please check input samplesheet -> Reads file does not exist!\n${row.hic_reads1}")
