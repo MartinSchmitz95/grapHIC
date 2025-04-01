@@ -17,20 +17,16 @@ workflow GRAPHIC{
 	samplesheet
 
 	main:
-	def reads = './simreads/otava.badr-pb.1.fq.gz'
-	def hic_reads1 = './hic/SRR15198317_1.fastq'
-	def hic_reads2 = './hic/SRR15198317_2.fastq'
 
 	// parse input
-	//INPUT_CHECK( samplesheet )
+	INPUT_CHECK( samplesheet )
 
 	// run hifiasm to get unitigs
 	HIFIASM(
 		//INPUT_CHECK.out.reads.map { it -> [it[0], it[1].collectFile(), false }, // hifiasm should be able to handle multiple inputs
-		//INPUT_CHECK.out.reads.map { it -> [it[0], it[1], null] },
-		Channel.of([ [], reads, null]), // hard code for now
-		Channel.empty(),
-		Channel.empty()
+		INPUT_CHECK.out.reads.map { it -> [it[0], it[1], false] },
+		false,
+		false
 	)
 
 	// start graph construction already, can run in parallel
@@ -43,8 +39,7 @@ workflow GRAPHIC{
 	// align hic reads to unitigs
 	HIC(
 		ch_utigs.map { it -> it[1] },
-		//INPUT_CHECK.out.hic_reads.map { it -> [it[1], it[2]] }
-		Channel.of([hic_reads1, hic_reads2])
+		INPUT_CHECK.out.hic_reads.map { it -> [it[1], it[2]] }
 	)
 
 	// transform to graph structure
