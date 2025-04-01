@@ -52,6 +52,9 @@ take:
 				.set { merged_in }
 		}
 
+	merged_in.reads.view()
+	merged_in.hic_reads.view()
+
 	// export as output
 	merged_in.reads.flatMap { it -> 
 			def map = []
