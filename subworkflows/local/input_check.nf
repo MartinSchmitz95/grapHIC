@@ -65,25 +65,27 @@ take:
 	merged_in.hic_reads.view()
 
 	// export as output
-	merged_in.reads.flatMap { it -> 
-			def map = []
-			it[1].eachWithIndex() { tup,i ->
-				meta = tup[0].clone()
-				meta.chunk = i
-				map += [meta, tup[1]]
-				}
-			map
-		}.set{ reads }
+	merged_in.reads.set{ reads }
+	merged_in.hic_reads.set{ hic_reads }
+//	merged_in.reads.flatMap { it -> 
+//			def map = []
+//			it[1].eachWithIndex() { tup,i ->
+//				meta = tup[0].clone()
+//				meta.chunk = i
+//				map += [meta, tup[1]]
+//				}
+//			map
+//		}.set{ reads }
 
-	merged_in.hic_reads.flatMap { it -> 
-			def map = []
-			it[1].eachWithIndex() { tup,i ->
-				meta = tup[0].clone()
-				meta.chunk = i
-				map += [meta, tup[1]]
-				}
-			map
-		}.set{ hic_reads }
+//	merged_in.hic_reads.flatMap { it -> 
+//			def map = []
+//			it[1].eachWithIndex() { tup,i ->
+//				meta = tup[0].clone()
+//				meta.chunk = i
+//				map += [meta, tup[1]]
+//				}
+//			map
+//		}.set{ hic_reads }
 
 	reads.view()
 	hic_reads.view()
