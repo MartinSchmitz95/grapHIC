@@ -30,6 +30,8 @@ workflow HICPRO {
   ligation_site // value
 
   main:
+  reads.view()
+  ligation_site.view()
   ch_versions = Channel.empty()
 
   // Fastq to paired-end bam
