@@ -38,8 +38,8 @@ workflow GRAPHIC{
 
 	// align hic reads to unitigs
 	HIC(
-		ch_utigs.map { it -> it[1] },
-		INPUT_CHECK.out.hic_reads.map { it -> [it[1], it[2]] }
+		ch_utigs,
+		INPUT_CHECK.out.hic_reads.map { it -> [it[0], it[1][0], it[1][1]] }
 	)
 
 	// transform to graph structure
