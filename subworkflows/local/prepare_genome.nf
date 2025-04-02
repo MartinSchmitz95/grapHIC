@@ -9,7 +9,7 @@ include { GET_RESTRICTION_FRAGMENTS } from '../../modules/local/hicpro/get_restr
 workflow PREPARE_GENOME {
 
   take:
-  fasta
+  fasta // [file]? or [meta, file]
   restriction_site
 
   main:

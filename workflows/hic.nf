@@ -87,8 +87,8 @@ def multiqc_report = []
 
 workflow HIC {
   take:
-  ch_fasta // filepath
-  ch_hic_reads // channel emitting pairs of files
+  ch_fasta // [meta, file]
+  ch_hic_reads // [meta, file, file]
 
   main:
 
@@ -103,9 +103,8 @@ workflow HIC {
   )
   ch_versions = ch_versions.mix(PREPARE_GENOME.out.versions)
 
-  //
-  // MODULE: Run FastQC
-  //
+  // Run FastQC module
+  // does this work with two read inputs? Might have to flatmap it
   FASTQC (
     ch_hic_reads
   )

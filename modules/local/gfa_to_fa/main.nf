@@ -5,10 +5,10 @@ process GFA_TO_FA {
 	 // to allow mapping to unitigs
 
     input:
-    path gfa
+    tuple val(meta), path(gfa)
 
     output:
-    path "*.fa{.gz,}", emit: fasta
+    tuple val(meta), path("*.fa{.gz,}"), emit: fasta
 
     when:
     task.ext.when == null || task.ext.when
