@@ -10,5 +10,7 @@
 ## - cooler
 micromamba activate nf-core
 
+mkdir $(basename $1 .csv) # to be sure the dir exists
+
 nextflow ~/graphic/main.nf --input $1 -bg --dnase --outdir $(basename $1 .csv)
 # -profile conda # if not running in a conda env above
