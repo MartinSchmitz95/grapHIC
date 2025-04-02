@@ -24,9 +24,9 @@ workflow GRAPHIC{
 	// run hifiasm to get unitigs
 	HIFIASM(
 		//INPUT_CHECK.out.reads.map { it -> [it[0], it[1].collectFile(), false }, // hifiasm should be able to handle multiple inputs
-		INPUT_CHECK.out.reads.map { it -> [it[0], it[1], false] },
-		false,
-		false
+		INPUT_CHECK.out.reads.map { it -> [it[0], it[1], []] },
+		[[], [], []],
+		[[], [], []]
 	)
 
 	// start graph construction already, can run in parallel
