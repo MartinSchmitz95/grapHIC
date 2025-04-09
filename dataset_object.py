@@ -76,6 +76,7 @@ class HicDatasetCreator:
         self.merged_graphs_path = os.path.join(dataset_path, "merged_graphs")
         self.coverage_path = os.path.join(dataset_path, "coverage")
         self.single_read_haplotypes_path = os.path.join(dataset_path, "single_read_haplotypes")
+        self.reduced_reads_path = os.path.join(dataset_path, "reduced_reads")
 
         self.deadends = {}
         self.gt_rescue = {}
@@ -83,7 +84,7 @@ class HicDatasetCreator:
 
         for folder in [self.single_read_haplotypes_path, self.coverage_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
                        self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path,
-                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path]:
+                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path, self.reduced_reads_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
@@ -415,12 +416,12 @@ class HicDatasetCreator:
     def parse_gfa(self):
         nx_graph, read_seqs, unitig_2_node, utg_2_reads, single_read_haplotypes = self.only_from_gfa()
         # Save data
-        self.pickle_save(unitig_2_node, self.unitig_to_node_path)
-        self.pickle_save(utg_2_reads, self.utg_2_reads_path)
-        self.pickle_save(single_read_haplotypes, self.single_read_haplotypes_path)
-        
-        """
+        #self.pickle_save(unitig_2_node, self.unitig_to_node_path)
+        #self.pickle_save(utg_2_reads, self.utg_2_reads_path)
+        #self.pickle_save(single_read_haplotypes, self.single_read_haplotypes_path)
         self.create_reads_fasta(read_seqs, self.chr_id)  # Add self.chr_id as an argument
+
+        """
 
         with open(os.path.join(self.node_to_read_path, f'{self.genome_str}.pkl'), 'rb') as f:
             node_to_read = pickle.load(f)
@@ -1860,4 +1861,41 @@ class HicDatasetCreator:
                 
         return features
 
+        
+    from Bio import SeqIO
+    from Bio.SeqRecord import SeqRecord
+    from Bio.Seq import Seq
+
+    def process_fastq_gz_badread(self, input_file, all_reads, v, start_id=0):
+        with gzip.open(input_file, "rt") as handle:
+            for idx, record in enumerate(SeqIO.parse(handle, "fastq")):
+                # Parse the header to extract relevant information
+                parts = record.description.split()
+                chr_info = parts[1].split(',')
+                # Extract strand, start, and end from chr_info
+                if len(chr_info) < 2:
+                    start, end = 0, 0
+                    strand = "+"
+                else:
+                    strand = chr_info[1][0]  # Get the first character, which is either '-' or '+'
+                    start, end = map(int, chr_info[2].split('-'))
+
+                # Create the new description
+                new_description = f'strand={strand} start={start} end={end} variant={v} chr={self.chr_id[3:]}'
+
+                # Create a new SeqRecord with updated description and a new id
+                new_record = SeqRecord(
+                    seq=record.seq,
+                    id=f"{idx+start_id}",
+                    description=new_description,
+                    letter_annotations={"phred_quality": record.letter_annotations["phred_quality"]}
+                )
+                #new_record.letter_annotations["phred_quality"] = record.letter_annotations["phred_quality"]
+                # Add the new record to the list
+                all_reads.append(new_record)
+        return idx
+
+
 """
+
+
