@@ -1,11 +1,11 @@
 paths:
   sample_profile: hg002hifi
-  pbsim_path: /home/stuleon/vendor/pbsim3
-  hifiasm_path: /home/stuleon/vendor/hifiasm-0.23.0/
-  raven_path: /home/stuleon/vendor/heron-raven
-  herro_path: /home/stuleon/vendor/herro_folder
-  hifiasm_dump: /home/stuleon/scratch/dumps/hifiasm_dump_4
-  raft_path: /home/stuleon/vendor/RAFT
+  pbsim_path: /home/schmitzmf/pbsim3
+  hifiasm_path: /home/schmitzmf/vendor/hifiasm-0.23.0/
+  raven_path: /home/schmitzmf/vendor/heron-raven
+  herro_path: /home/schmitzmf/vendor/herro_folder
+  hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_4
+  raft_path: /home/schmitzmf/vendor/RAFT
   centromere_coords: /dev/null
   hic_readsfiles_pairs:
     - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
@@ -13,7 +13,7 @@ paths:
   nextflow_path: "$(which nextflow)"
   # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
   # with nf-core tools installed
-  hic_pipeline_path: /home/stuleon/prj/nf-core-hic_2.1.0/2_1_0/main.nf
+  hic_pipeline_path: /home/schmitzmf/prj/nf-core-hic_2.1.0/2_1_0/main.nf
 gen_config:
   depth: 20
   threads: 16
@@ -25,12 +25,12 @@ gen_config:
 gen_steps:
   sample_reads: False
   create_graphs: False
-  parse_gfa: True
-  hic: True
+  parse_gfa: False
+  hic: False
   pile-o-gram: False
   diploid_features: False
   ground_truth: False
-  ml_graphs: False
+  ml_graphs: True
 nfcore_hic:
   # using dnase mode
   dnase: True
@@ -74,7 +74,6 @@ nextflow: |
       }
   }
 training:
-  i002c_v04.multi_21: 100
-  i002c_v04.multi_10: 0
+  i002c_v04.multi_21: 3
+
 validation:
-  i002c_v04.multi_5: 0

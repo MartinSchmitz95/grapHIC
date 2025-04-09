@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch_geometric.utils import degree
 from torch_sparse import SparseTensor, matmul
 
+
 def full_attention_conv(qs, ks, vs, output_attn=False):
     """
     qs: query tensor [N, H, M]
@@ -58,7 +59,6 @@ class GraphConvLayer(nn.Module):
 
         self.use_init = use_init
         self.use_weight = use_weight
-        # Adjust input channels to handle concatenated features from previous layer
         if self.use_init:
             in_channels_ = 2 * in_channels
         else:
@@ -68,21 +68,21 @@ class GraphConvLayer(nn.Module):
     def reset_parameters(self):
         self.W.reset_parameters()
 
-    def forward(self, x, edge_index, edge_weight, x0):
+    def forward(self, x, edge_index, x0):
         N = x.shape[0]
         row, col = edge_index
         d = degree(col, N).float()
         d_norm_in = (1.0 / d[col]).sqrt()
         d_norm_out = (1.0 / d[row]).sqrt()
-        # Multiply the normalization with edge weights
-        value = edge_weight * d_norm_in * d_norm_out
+        value = torch.ones_like(row) * d_norm_in * d_norm_out
         value = torch.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)
         adj = SparseTensor(row=col, col=row, value=value, sparse_sizes=(N, N))
         x = matmul(adj, x)  # [N, D]
 
         if self.use_init:
             x = torch.cat([x, x0], 1)
-        if self.use_weight:
+            x = self.W(x)
+        elif self.use_weight:
             x = self.W(x)
 
         return x
@@ -109,8 +109,6 @@ class GraphConv(nn.Module):
 
         self.bns = nn.ModuleList()
         self.bns.append(nn.BatchNorm1d(hidden_channels))
-        
-        # All layers process hidden_channels like in original SGformer.py
         for _ in range(num_layers):
             self.convs.append(
                 GraphConvLayer(hidden_channels, hidden_channels, use_weight, use_init)
@@ -131,7 +129,7 @@ class GraphConv(nn.Module):
         for fc in self.fcs:
             fc.reset_parameters()
 
-    def forward(self, x, edge_index, edge_weight):
+    def forward(self, x, edge_index):
         layer_ = []
 
         x = self.fcs[0](x)
@@ -143,7 +141,7 @@ class GraphConv(nn.Module):
         layer_.append(x)
 
         for i, conv in enumerate(self.convs):
-            x = conv(x, edge_index, edge_weight, layer_[0])
+            x = conv(x, edge_index, layer_[0])
             if self.use_bn:
                 x = self.bns[i + 1](x)
             if self.use_act:
@@ -151,7 +149,6 @@ class GraphConv(nn.Module):
             x = F.dropout(x, p=self.dropout, training=self.training)
             if self.use_residual:
                 x = x + layer_[-1]
-            layer_.append(x)
         return x
 
 
@@ -301,8 +298,7 @@ class SGFormer(nn.Module):
         trans_num_layers=1,
         trans_num_heads=1,
         trans_dropout=0.5,
-        gnn_num_layers_0=1,  # Number of layers for edge type 0
-        gnn_num_layers_1=1,  # Number of layers for edge type 1
+        gnn_num_layers=1,
         gnn_dropout=0.5,
         gnn_use_weight=True,
         gnn_use_init=False,
@@ -315,9 +311,10 @@ class SGFormer(nn.Module):
         trans_use_weight=True,
         trans_use_act=True,
         use_graph=True,
+        graph_weight=0.8,
+        aggregate="add",
     ):
         super().__init__()
-        
         self.trans_conv = TransConv(
             in_channels,
             hidden_channels,
@@ -330,12 +327,10 @@ class SGFormer(nn.Module):
             trans_use_weight,
             trans_use_act,
         )
-        
-        # Create two separate GNNs with different numbers of layers
-        self.graph_conv_0 = GraphConv(
+        self.graph_conv = GraphConv(
             in_channels,
             hidden_channels,
-            gnn_num_layers_0,  # Different number of layers for type 0
+            gnn_num_layers,
             gnn_dropout,
             gnn_use_bn,
             gnn_use_residual,
@@ -343,71 +338,43 @@ class SGFormer(nn.Module):
             gnn_use_init,
             gnn_use_act,
         )
-        
-        self.graph_conv_1 = GraphConv(
-            in_channels,
-            hidden_channels,
-            gnn_num_layers_1,  # Different number of layers for type 1
-            gnn_dropout,
-            gnn_use_bn,
-            gnn_use_residual,
-            gnn_use_weight,
-            gnn_use_init,
-            gnn_use_act,
-        )
-        
         self.use_graph = use_graph
+        self.graph_weight = graph_weight
 
-        # Final layer always expects 3 * hidden_channels
-        self.fc = nn.Sequential(
-            nn.Linear(3 * hidden_channels, out_channels),
-            nn.Tanh()
-        )
+        self.aggregate = aggregate
 
-    def forward(self, data):
-        x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
-        
-        """# Remove columns 10 and 12 from x
-        cols_to_keep = torch.ones(x.shape[1], dtype=torch.bool)
-        cols_to_keep[10] = False
-        cols_to_keep[12] = False
-
-        x = x[:, cols_to_keep]"""
-
-        # Get transformer embeddings
-        x_trans = self.trans_conv(x, edge_type)
-        
-        if self.use_graph:
-            # Process edge type 0
-            mask_0 = edge_type == 0
-            edge_index_0 = edge_index[:, mask_0]
-            edge_weight_0 = edge_weight[mask_0]
-            x_graph_0 = self.graph_conv_0(x, edge_index_0, edge_weight_0)
-            
-            # Process edge type 1
-            mask_1 = edge_type == 1
-            edge_index_1 = edge_index[:, mask_1]
-            edge_weight_1 = edge_weight[mask_1]
-            x_graph_1 = self.graph_conv_1(x, edge_index_1, edge_weight_1)
-            
-            # Concatenate all embeddings [transformer, graph_type0, graph_type1]
-            x = torch.cat([x_trans, x_graph_0, x_graph_1], dim=1)
+        if aggregate == "add":
+            self.fc = nn.Linear(hidden_channels, out_channels)
+        elif aggregate == "cat":
+            self.fc = nn.Linear(2 * hidden_channels, out_channels)
         else:
-            # If not using graph, pad with zeros to maintain dimension
-            batch_size = x_trans.shape[0]
-            hidden_dim = x_trans.shape[1]
-            padding = torch.zeros(batch_size, 2 * hidden_dim).to(x_trans.device)
-            x = torch.cat([x_trans, padding], dim=1)
-        
+            raise ValueError(f"Invalid aggregate type:{aggregate}")
+
+        self.params1 = list(self.trans_conv.parameters())
+        self.params2 = (
+            list(self.graph_conv.parameters()) if self.graph_conv is not None else []
+        )
+        self.params2.extend(list(self.fc.parameters()))
+
+    def forward(self, x, edge_index):
+        x1 = self.trans_conv(x)
+        if self.use_graph:
+            x2 = self.graph_conv(x, edge_index)
+            if self.aggregate == "add":
+                x = self.graph_weight * x2 + (1 - self.graph_weight) * x1
+            else:
+                x = torch.cat((x1, x2), dim=1)
+        else:
+            x = x1
         x = self.fc(x)
         return x
 
     def get_attentions(self, x):
         attns = self.trans_conv.get_attentions(x)  # [layer num, N, N]
+
         return attns
 
     def reset_parameters(self):
         self.trans_conv.reset_parameters()
         if self.use_graph:
-            self.graph_conv_0.reset_parameters()
-            self.graph_conv_1.reset_parameters()
+            self.graph_conv.reset_parameters()

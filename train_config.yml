@@ -1,12 +1,23 @@
 training:
   seed: 1
-  num_epochs: 200
-  num_gnn_layers: 8
-  num_trans_layers: 1
-  hidden_features: 256
-  node_features: 7
-  gnn_dropout: 0.5
+  num_epochs: 10000
+  num_gnn_layers_overlap: 8
+  num_gnn_layers_hic: 8
+  num_trans_layers: 3
+  hidden_features: 512
+  emb_dim: 128
+  projection_dim: 16
+  node_features: 1
+  gnn_dropout: 0.0
   lr: 0.0001
   wandb_mode: 'online'
   decay: 0.95
   patience: 2
+  alpha: 0.0
+  compute_metrics_every: 100
+  visualize_during_training: False
+  only_scaffold: False
+  only_phase: False
+  batch_size: 4096
+  evaluate: True
+  visualize: False
