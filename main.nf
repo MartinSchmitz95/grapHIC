@@ -30,9 +30,9 @@ workflow GRAPHIC{
 	)
 
 	// start graph construction already, can run in parallel
-	GFA_TO_GRAPH(HIFIASM.out.processed_unitigs)
+	GFA_TO_GRAPH(HIFIASM.out.raw_unitigs)
 
-	GFA_TO_FA(HIFIASM.out.processed_unitigs)
+	GFA_TO_FA(HIFIASM.out.raw_unitigs)
 
 	ch_utigs = GFA_TO_FA.out.fasta
 
