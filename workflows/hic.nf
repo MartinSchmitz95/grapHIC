@@ -88,7 +88,7 @@ def multiqc_report = []
 workflow HIC {
   take:
   ch_fasta // [meta, file]
-  ch_hic_reads // [meta, file, file]
+  ch_hic_reads // [meta, file, file] // match hicpro input
 
   main:
 
@@ -106,7 +106,7 @@ workflow HIC {
   // Run FastQC module
   // does this work with two read inputs? Might have to flatmap it
   FASTQC (
-    ch_hic_reads
+    ch_hic_reads // works, as fastqc has paired read support
   )
   ch_versions = ch_versions.mix(FASTQC.out.versions)
 

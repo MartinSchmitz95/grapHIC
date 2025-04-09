@@ -21,6 +21,8 @@ workflow GRAPHIC{
 	// parse input
 	INPUT_CHECK( samplesheet )
 
+	// TODO run fastqc on input Hifi reads?
+
 	// run hifiasm to get unitigs
 	HIFIASM(
 		//INPUT_CHECK.out.reads.map { it -> [it[0], it[1].collectFile(), false }, // hifiasm should be able to handle multiple inputs
@@ -39,7 +41,8 @@ workflow GRAPHIC{
 	// align hic reads to unitigs
 	HIC(
 		ch_utigs,
-		INPUT_CHECK.out.hic_reads.map { it -> [it[0], it[1][0], it[1][1]] }
+		INPUT_CHECK.out.hic_reads.map { it -> [it[0], it[1][0][0], it[1][0][1]] }
+		// convert to [id, reads1, reads2]
 	)
 
 	// transform to graph structure
