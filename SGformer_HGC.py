@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.utils import degree
 from torch_sparse import SparseTensor, matmul
+from torch_geometric.nn import HeteroConv, GCNConv
+from torch_geometric.data import HeteroData
 
 def full_attention_conv(qs, ks, vs, output_attn=False):
     """
@@ -86,7 +88,6 @@ class GraphConvLayer(nn.Module):
             x = self.W(x)
 
         return x
-
 
 class GraphConv(nn.Module):
     def __init__(
@@ -301,8 +302,7 @@ class SGFormer(nn.Module):
         trans_num_layers=1,
         trans_num_heads=1,
         trans_dropout=0.5,
-        gnn_num_layers_0=1,  # Number of layers for edge type 0
-        gnn_num_layers_1=1,  # Number of layers for edge type 1
+        gnn_num_layers=1,  # Single parameter for GNN layers
         gnn_dropout=0.5,
         gnn_use_weight=True,
         gnn_use_init=False,
@@ -314,7 +314,7 @@ class SGFormer(nn.Module):
         trans_use_residual=True,
         trans_use_weight=True,
         trans_use_act=True,
-        use_graph=True,
+        projection_dim=128,  # Dimension for contrastive learning projection
     ):
         super().__init__()
         
@@ -331,83 +331,175 @@ class SGFormer(nn.Module):
             trans_use_act,
         )
         
-        # Create two separate GNNs with different numbers of layers
-        self.graph_conv_0 = GraphConv(
-            in_channels,
-            hidden_channels,
-            gnn_num_layers_0,  # Different number of layers for type 0
-            gnn_dropout,
-            gnn_use_bn,
-            gnn_use_residual,
-            gnn_use_weight,
-            gnn_use_init,
-            gnn_use_act,
-        )
+        # Replace separate GNNs with HeteroGCN from PyG
+            
+            
+        self.convs = nn.ModuleList()
+        for _ in range(gnn_num_layers):
+            conv = HeteroConv({
+                ('node', '0', 'node'): GCNConv(hidden_channels, hidden_channels),
+                ('node', '1', 'node'): GCNConv(hidden_channels, hidden_channels),
+            }, aggr='sum')
+            self.convs.append(conv)
+            
+        self.lins = nn.ModuleList()
+        self.lins.append(nn.Linear(in_channels, hidden_channels))
+        for _ in range(gnn_num_layers):
+            self.lins.append(nn.Linear(hidden_channels, hidden_channels))
+            
+        self.bns = nn.ModuleList()
+        for _ in range(gnn_num_layers + 1):
+            self.bns.append(nn.BatchNorm1d(hidden_channels))
         
-        self.graph_conv_1 = GraphConv(
-            in_channels,
-            hidden_channels,
-            gnn_num_layers_1,  # Different number of layers for type 1
-            gnn_dropout,
-            gnn_use_bn,
-            gnn_use_residual,
-            gnn_use_weight,
-            gnn_use_init,
-            gnn_use_act,
-        )
-        
-        self.use_graph = use_graph
+        self.gnn_dropout = gnn_dropout
+        self.gnn_use_bn = gnn_use_bn
+        self.gnn_use_residual = gnn_use_residual
+        self.gnn_use_act = gnn_use_act
 
-        # Final layer always expects 3 * hidden_channels
+        # Final layer for classification/regression tasks
         self.fc = nn.Sequential(
-            nn.Linear(3 * hidden_channels, out_channels),
+            nn.Linear(2 * hidden_channels, out_channels),
             nn.Tanh()
         )
+        
+        # Projection head for contrastive learning
+        middle_proj_dim = (out_channels+projection_dim)//2
+        self.projection = nn.Sequential(
+            nn.Linear(out_channels, middle_proj_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(middle_proj_dim, projection_dim)
+        )
 
-    def forward(self, data):
+    def forward(self, data, return_projection=False):
         x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
         
-        """# Remove columns 10 and 12 from x
-        cols_to_keep = torch.ones(x.shape[1], dtype=torch.bool)
-        cols_to_keep[10] = False
-        cols_to_keep[12] = False
-
-        x = x[:, cols_to_keep]"""
-
         # Get transformer embeddings
         x_trans = self.trans_conv(x, edge_type)
         
-        if self.use_graph:
-            # Process edge type 0
-            mask_0 = edge_type == 0
-            edge_index_0 = edge_index[:, mask_0]
-            edge_weight_0 = edge_weight[mask_0]
-            x_graph_0 = self.graph_conv_0(x, edge_index_0, edge_weight_0)
-            
-            # Process edge type 1
-            mask_1 = edge_type == 1
-            edge_index_1 = edge_index[:, mask_1]
-            edge_weight_1 = edge_weight[mask_1]
-            x_graph_1 = self.graph_conv_1(x, edge_index_1, edge_weight_1)
-            
-            # Concatenate all embeddings [transformer, graph_type0, graph_type1]
-            x = torch.cat([x_trans, x_graph_0, x_graph_1], dim=1)
-        else:
-            # If not using graph, pad with zeros to maintain dimension
-            batch_size = x_trans.shape[0]
-            hidden_dim = x_trans.shape[1]
-            padding = torch.zeros(batch_size, 2 * hidden_dim).to(x_trans.device)
-            x = torch.cat([x_trans, padding], dim=1)
-        
-        x = self.fc(x)
-        return x
 
+        # Create a HeteroData object
+        hetero_data = HeteroData()
+        hetero_data['node'].x = self.lins[0](x)
+        if self.gnn_use_bn:
+            hetero_data['node'].x = self.bns[0](hetero_data['node'].x)
+        hetero_data['node'].x = F.relu(hetero_data['node'].x)
+        hetero_data['node'].x = F.dropout(hetero_data['node'].x, p=self.gnn_dropout, training=self.training)
+        
+        # Add edges by type
+        for edge_type_val in [0, 1]:
+            mask = edge_type == edge_type_val
+            hetero_data[('node', str(edge_type_val), 'node')].edge_index = edge_index[:, mask]
+            hetero_data[('node', str(edge_type_val), 'node')].edge_attr = edge_weight[mask].unsqueeze(1)
+        
+        # Apply heterogeneous GNN layers
+        x_dict = {'node': hetero_data['node'].x}
+        for i, conv in enumerate(self.convs):
+            x_dict_new = conv(x_dict, hetero_data.edge_index_dict, hetero_data.edge_attr_dict)
+            if self.gnn_use_residual:
+                x_dict_new['node'] = x_dict_new['node'] + x_dict['node']
+            
+            x_dict_new['node'] = self.lins[i+1](x_dict_new['node'])
+            if self.gnn_use_bn:
+                x_dict_new['node'] = self.bns[i+1](x_dict_new['node'])
+            if self.gnn_use_act:
+                x_dict_new['node'] = F.relu(x_dict_new['node'])
+            x_dict_new['node'] = F.dropout(x_dict_new['node'], p=self.gnn_dropout, training=self.training)
+            
+            x_dict = x_dict_new
+        
+        # Extract node features - single GNN embedding
+        x_graph = x_dict['node']
+        
+        # Concatenate transformer and GNN embeddings
+        combined_embedding = torch.cat([x_trans, x_graph], dim=1)
+        
+        # For standard tasks (classification/regression)
+        output = self.fc(combined_embedding)
+        #projection = F.normalize(projection, p=2, dim=1)
+
+        # For contrastive learning
+        if return_projection:
+            projection = self.projection(output)
+            # Normalize the projection to unit hypersphere
+            projection = F.normalize(projection, p=2, dim=1)
+            return projection
+        
+        return output
+
+    
     def get_attentions(self, x):
         attns = self.trans_conv.get_attentions(x)  # [layer num, N, N]
         return attns
 
     def reset_parameters(self):
         self.trans_conv.reset_parameters()
-        if self.use_graph:
-            self.graph_conv_0.reset_parameters()
-            self.graph_conv_1.reset_parameters()
+        for conv in self.convs:
+            for conv_layer in conv.convs.values():
+                conv_layer.reset_parameters()
+        for lin in self.lins:
+            lin.reset_parameters()
+        for bn in self.bns:
+            bn.reset_parameters()
+    
+        # Reset projection head
+        for layer in self.projection:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+
+class debug_model(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels,
+        out_channels,
+        projection_dim=128,
+    ):
+        super().__init__()
+        
+        # Input layer (simplified from SGFormer)
+        self.input_layer = nn.Linear(in_channels, hidden_channels)
+        
+        # Output layer (same as in SGFormer)
+        self.fc = nn.Sequential(
+            nn.Linear(2 * hidden_channels, out_channels),
+            nn.Tanh()
+        )
+        
+        # Projection head for contrastive learning (same as in SGFormer)
+        middle_proj_dim = (out_channels+projection_dim)//2
+        self.projection = nn.Sequential(
+            nn.Linear(out_channels, middle_proj_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(middle_proj_dim, projection_dim)
+        )
+
+    def forward(self, data, return_projection=False):
+        x = data.x
+        
+        # Process through input layer
+        x_processed = self.input_layer(x)
+        
+        # Create a dummy second embedding to match SGFormer's concatenation
+        # This duplicates the processed features to maintain the expected dimensions
+        combined_embedding = torch.cat([x_processed, x_processed], dim=1)
+        
+        # Final output
+        output = self.fc(combined_embedding)
+        
+        # For contrastive learning
+        if return_projection:
+            projection = self.projection(output)
+            # Normalize the projection to unit hypersphere
+            projection = F.normalize(projection, p=2, dim=1)
+            return projection
+        
+        return output
+        
+    def reset_parameters(self):
+        self.input_layer.reset_parameters()
+        for layer in self.fc:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+        for layer in self.projection:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()

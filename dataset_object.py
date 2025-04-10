@@ -75,19 +75,21 @@ class HicDatasetCreator:
         self.hic_graphs_path = os.path.join(dataset_path, "hic_graphs")
         self.merged_graphs_path = os.path.join(dataset_path, "merged_graphs")
         self.coverage_path = os.path.join(dataset_path, "coverage")
+        self.single_read_haplotypes_path = os.path.join(dataset_path, "single_read_haplotypes")
+        self.reduced_reads_path = os.path.join(dataset_path, "reduced_reads")
 
         self.deadends = {}
         self.gt_rescue = {}
         self.edge_info = {}
 
-        for folder in [self.coverage_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
+        for folder in [self.single_read_haplotypes_path, self.coverage_path, self.jellyfish_path, self.utg_2_reads_path, self.fasta_unitig_path, self.fasta_raw_path, self.full_reads_path, self.gfa_unitig_path, self.gfa_raw_path, self.nx_graphs_path,
                        self.pyg_graphs_path, self.read_descr_path, self.tmp_path, self.overlaps_path,
-                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path]:
+                       self.hic_graphs_path, self.merged_graphs_path, self.unitig_2_node_path, self.reduced_reads_path]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
 
         #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
-        self.node_attrs = ['in_degree', 'read_length', 'cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']
+        self.node_attrs = ['overlap_degree', 'hic_degree', 'read_length', 'hic_neighbor_weight', 'support']#, 'cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']
 
     def load_chromosome(self, genome, chr_id, ref_path):
         self.genome_str = f'{genome}_{chr_id}'
@@ -412,14 +414,14 @@ class HicDatasetCreator:
         return nx.compose(nx.MultiGraph(nx_graph), nx.MultiGraph(hic_graph))
 
     def parse_gfa(self):
-        nx_graph, read_seqs, unitig_2_node, utg_2_reads = self.only_from_gfa()
+        nx_graph, read_seqs, unitig_2_node, utg_2_reads, single_read_haplotypes = self.only_from_gfa()
         # Save data
-        self.pickle_save(unitig_2_node, self.unitig_to_node_path)
-        self.pickle_save(utg_2_reads, self.utg_2_reads_path)
-
-        
-        """
+        #self.pickle_save(unitig_2_node, self.unitig_to_node_path)
+        #self.pickle_save(utg_2_reads, self.utg_2_reads_path)
+        #self.pickle_save(single_read_haplotypes, self.single_read_haplotypes_path)
         self.create_reads_fasta(read_seqs, self.chr_id)  # Add self.chr_id as an argument
+
+        """
 
         with open(os.path.join(self.node_to_read_path, f'{self.genome_str}.pkl'), 'rb') as f:
             node_to_read = pickle.load(f)
@@ -447,12 +449,13 @@ class HicDatasetCreator:
         read_to_node, node_to_read, old_read_to_utg = {}, {}, {}  ##########
         unitig_2_node = {}
         utg_2_reads = {}
+        single_read_haplotypes = {}
+        node_support = {}
         #edges_dict = {}
         read_lengths, read_seqs = {}, {}  # Obtained from the GFA
         read_idxs, read_strands, read_starts, read_ends, read_chrs, read_variants, variant_class = {}, {}, {}, {}, {}, {}, {}  # Obtained from the FASTA/Q headers
         edge_ids, prefix_lengths, overlap_lengths, overlap_similarities = {}, {}, {}, {}
         no_seqs_flag = self.assembler == 'raven'
-
 
         time_start = datetime.now()
         print(f'Starting to loop over GFA')
@@ -525,6 +528,8 @@ class HicDatasetCreator:
                             id = ids
                             node_to_read[real_idx] = id
                             node_to_read[virt_idx] = id
+                            node_support[real_idx] = 1
+                            node_support[virt_idx] = 1
                     else:
                         print(f"Unknown line type: {line}")
                         exit()
@@ -539,11 +544,16 @@ class HicDatasetCreator:
                             end = int(re.findall(r'end=(\d+)', description)[0])  # untrimmed
                             #chromosome = int(re.findall(r'chr=(\d+)', description)[0])
                             chromosome = re.findall(r'chr=([^\s]+)', description)[0]
+                            if self.diploid:
+                                variant = re.findall(r'variant=([P|M])', description)[0]
+                            else:
+                                variant = '0'
                         else:
                             strands = []
                             starts = []
                             ends = []
                             chromosomes = []
+                            check_variant = None
                             for id_r, id_o in id:
                                 description = read_headers[id_r]
                                 # desc_id, strand, start, end = description.split()
@@ -560,6 +570,12 @@ class HicDatasetCreator:
                                 #chromosome = int(re.findall(r'chr=(\d+)', description)[0])
                                 chromosome = re.findall(r'chr=([^\s]+)', description)[0]
                                 chromosomes.append(chromosome)
+                                if self.diploid:
+                                    variant = re.findall(r'variant=([P|M])', description)[0]
+                                    single_read_haplotypes[id_r] = variant
+                                else:
+                                    variant = '0'
+                                    single_read_haplotypes[id_r] = variant
 
                             # What if they come from different strands but are all merged in a single unitig?
                             # Or even worse, different chromosomes? How do you handle that?
@@ -569,10 +585,6 @@ class HicDatasetCreator:
                             end = max(ends)
                             chromosome = Counter(chromosomes).most_common()[0][0]
 
-                        if self.diploid:
-                            variant = re.findall(r'variant=([P|M])', description)[0]
-                        else:
-                            variant = '0'
                         read_strands[real_idx], read_strands[virt_idx] = strand, -strand
                         read_starts[real_idx] = read_starts[virt_idx] = start
                         read_ends[real_idx] = read_ends[virt_idx] = end
@@ -666,6 +678,8 @@ class HicDatasetCreator:
             nx.set_node_attributes(graph_nx, read_variants, 'read_variant')
             nx.set_node_attributes(graph_nx, read_chrs, 'read_chr')
             node_attrs.extend(['read_strand', 'read_start', 'read_end', 'read_variant', 'read_chr'])
+        
+        nx.set_node_attributes(graph_nx, node_support, 'support')
 
         #nx.set_edge_attributes(graph_nx, overlap_similarities, 'overlap_similarity')
         #edge_attrs.append('overlap_similarity')
@@ -675,10 +689,9 @@ class HicDatasetCreator:
 
         # Why is this the case? Is it because if there is even a single 'A' file in the .gfa, means the format is all 'S' to 'A' lines?
 
-
         # Print number of nodes and edges in graph
     
-        return graph_nx, read_seqs, unitig_2_node, utg_2_reads
+        return graph_nx, read_seqs, unitig_2_node, utg_2_reads, single_read_haplotypes
 
     def nx_utg_ftrs(self, nx_graph):
         strand = nx.get_node_attributes(nx_graph, 'read_strand')
@@ -1296,6 +1309,7 @@ class HicDatasetCreator:
                 print(f"Warning: Unknown edge type {edge_type}, defaulting to 'overlap'")
                 edge_type = 'overlap'
                 exit()
+                
             edge_list.append([u, v])
             edge_types.append(edge_type_map[edge_type])
             edge_weights.append(data.get('weight', 1.0))  # Default weight to 1.0 if not found
@@ -1327,24 +1341,21 @@ class HicDatasetCreator:
             print(f"Std:  {torch.std(edge_weight[type_mask])}")
         
         # Now compute degrees after edge_index is created
-        out_degrees = degree(edge_index[0], num_nodes=num_nodes)
-        in_degrees = degree(edge_index[1], num_nodes=num_nodes)
+        overlap_degrees = degree(edge_index[0][edge_type == 0], num_nodes=num_nodes)  # For overlap edges
+        hic_degrees = degree(edge_index[0][edge_type == 1], num_nodes=num_nodes)  # For HiC edges
         
         # Add degree information to the graph
         for node in range(num_nodes):
-            nx_graph.nodes[node]['in_degree'] = float(in_degrees[node])
-            nx_graph.nodes[node]['out_degree'] = float(out_degrees[node])
+            nx_graph.nodes[node]['overlap_degree'] = float(overlap_degrees[node])
+            nx_graph.nodes[node]['hic_degree'] = float(hic_degrees[node])
         
         # Create node features using all features in self.node_attrs
         features = []
         for node in range(num_nodes):
             node_features = []
             for feat in self.node_attrs:
-                if feat in nx_graph.nodes[node]:
-                    node_features.append(float(nx_graph.nodes[node][feat]))
-                else:
-                    print(f"Warning: Feature {feat} not found for node {node}")
-                    node_features.append(0.0)  # Default value if feature is missing
+                node_features.append(float(nx_graph.nodes[node][feat]))
+
             features.append(node_features)
         x = torch.tensor(features, dtype=torch.float)
 
@@ -1371,10 +1382,17 @@ class HicDatasetCreator:
         )
 
         # Normalize features
-        self.normalize_ftrs(pyg_data, ['in_degree', 'read_length', 'cov_std', 'read_gc'],
+        #self.normalize_ftrs(pyg_data, ['overlap_degree', 'hic_degree', 'read_length', 'hic_neighbor_weight'])
+        # Divide features by different constants
+        pyg_data.x[:, self.node_attrs.index('overlap_degree')] /= 10
+        pyg_data.x[:, self.node_attrs.index('hic_degree')] /= 100
+        pyg_data.x[:, self.node_attrs.index('read_length')] /= 10000
+        pyg_data.x[:, self.node_attrs.index('hic_neighbor_weight')] /= 1000
+        pyg_data.x[:, self.node_attrs.index('support')] /= self.depth
+        """self.normalize_ftrs(pyg_data, ['in_degree', 'read_length', 'cov_std', 'read_gc'],
                             method='zscore')
         self.normalize_ftrs(pyg_data, ['cov_avg', 'cov_med'],
-                            method='mean')
+                            method='mean')"""
         # leave cov_pct unnormalized
 
         # Save PyG graph
@@ -1533,6 +1551,117 @@ class HicDatasetCreator:
         except subprocess.CalledProcessError as e:
             print(f"Error running pileup.sh: {e}")
             raise
+
+    def split_and_save_pyg(self, nx_graph, index):
+        """
+        Splits the graph by chromosome and saves each as a separate PyG graph.
+        Omits node features (x) and focuses only on the graph structure.
+        Names each graph according to its chromosome.
+        """
+        print()
+        print(f"Total nodes in graph: {nx_graph.number_of_nodes()}")
+        # Assert that nx_graph is a multigraph
+        assert isinstance(nx_graph, nx.MultiGraph) or isinstance(nx_graph, nx.MultiDiGraph), "Graph must be a NetworkX MultiGraph or MultiDiGraph"
+        
+        # Get all unique chromosomes in the graph
+        chr_values = set()
+        for node in nx_graph.nodes():
+            chr_values.add(nx_graph.nodes[node]['read_chr'])
+        
+        print(f"Found {len(chr_values)} unique chromosomes: {sorted(chr_values)}")
+        
+        # Process each chromosome separately
+        for chr_id in sorted(chr_values):
+            # Get nodes for this chromosome
+            chr_nodes = [node for node in nx_graph.nodes() if nx_graph.nodes[node]['read_chr'] == chr_id]
+            
+            if not chr_nodes:
+                continue
+                
+            # Create subgraph for this chromosome
+            chr_subgraph = nx_graph.subgraph(chr_nodes).copy()
+            
+            # Get number of nodes in this subgraph
+            num_nodes = chr_subgraph.number_of_nodes()
+            
+            # Create a mapping from original node IDs to consecutive indices
+            node_mapping = {old_id: new_id for new_id, old_id in enumerate(chr_subgraph.nodes())}
+            
+            # Initialize lists for edges, types and weights
+            edge_list = []
+            edge_types = []
+            edge_weights = []
+            
+            # Process each edge type
+            edge_type_map = {'overlap': 0, 'hic': 1}
+            
+            # Convert edges for each type
+            for (u, v, key, data) in chr_subgraph.edges(data=True, keys=True):
+                edge_type = data.get('type')  # Get edge type
+                # Ensure edge_type is a string
+                if isinstance(edge_type, list):
+                    edge_type = edge_type[0]  # Take first element if it's a list
+                elif edge_type is None:
+                    continue  # Skip edges with no type
+                
+                if edge_type not in edge_type_map:
+                    continue  # Skip unknown edge types
+                    
+                # Map node IDs to new consecutive indices
+                new_u = node_mapping[u]
+                new_v = node_mapping[v]
+                
+                edge_list.append([new_u, new_v])
+                edge_types.append(edge_type_map[edge_type])
+                edge_weights.append(data.get('weight', 1.0))  # Default weight to 1.0 if not found
+            
+            if not edge_list:
+                print(f"No edges found for chromosome {chr_id}, skipping")
+                continue
+                
+            # Convert to tensors
+            edge_index = torch.tensor(edge_list, dtype=torch.long).t()
+            edge_type = torch.tensor(edge_types, dtype=torch.long)
+            edge_weight = torch.tensor(edge_weights, dtype=torch.float)
+            
+            # Z-score normalize edge weights separately for each type
+            for type_idx in range(len(edge_type_map)):
+                # Create mask for current edge type
+                type_mask = edge_type == type_idx
+                
+                if not torch.any(type_mask):
+                    continue
+                
+                # Get weights for current type
+                type_weights = edge_weight[type_mask]
+                
+                # Compute mean and std for current type
+                type_mean = torch.mean(type_weights)
+                type_std = torch.std(type_weights)
+                
+                # Normalize weights for current type if std is not 0
+                if type_std != 0:
+                    edge_weight[type_mask] = (type_weights - type_mean) / type_std
+            
+            # Extract ground truth haplotype labels
+            gt_hap = [chr_subgraph.nodes[node]['gt_hap'] for node in chr_subgraph.nodes()]
+            gt_tensor = torch.tensor(gt_hap, dtype=torch.long)
+            
+            # Create PyG Data object without node features
+            pyg_data = Data(
+                edge_index=edge_index,
+                edge_type=edge_type,
+                edge_weight=edge_weight,
+                y=gt_tensor
+            )
+            
+            # Format chromosome ID for filename (remove 'chr' prefix if present)
+            chr_name = chr_id.replace('chr', '')
+            
+            # Save PyG graph
+            pyg_file = os.path.join(self.pyg_graphs_path, f'chr{chr_name}_{index}.pt')
+            torch.save(pyg_data, pyg_file)
+            print(f"Saved PyG graph for chromosome {chr_id} with {num_nodes} nodes and {len(edge_list)} edges to {pyg_file}")
 
 #################################################
 ####### Welcome to the Code Graveyard X.X #######
@@ -1732,4 +1861,41 @@ class HicDatasetCreator:
                 
         return features
 
+        
+    from Bio import SeqIO
+    from Bio.SeqRecord import SeqRecord
+    from Bio.Seq import Seq
+
+    def process_fastq_gz_badread(self, input_file, all_reads, v, start_id=0):
+        with gzip.open(input_file, "rt") as handle:
+            for idx, record in enumerate(SeqIO.parse(handle, "fastq")):
+                # Parse the header to extract relevant information
+                parts = record.description.split()
+                chr_info = parts[1].split(',')
+                # Extract strand, start, and end from chr_info
+                if len(chr_info) < 2:
+                    start, end = 0, 0
+                    strand = "+"
+                else:
+                    strand = chr_info[1][0]  # Get the first character, which is either '-' or '+'
+                    start, end = map(int, chr_info[2].split('-'))
+
+                # Create the new description
+                new_description = f'strand={strand} start={start} end={end} variant={v} chr={self.chr_id[3:]}'
+
+                # Create a new SeqRecord with updated description and a new id
+                new_record = SeqRecord(
+                    seq=record.seq,
+                    id=f"{idx+start_id}",
+                    description=new_description,
+                    letter_annotations={"phred_quality": record.letter_annotations["phred_quality"]}
+                )
+                #new_record.letter_annotations["phred_quality"] = record.letter_annotations["phred_quality"]
+                # Add the new record to the list
+                all_reads.append(new_record)
+        return idx
+
+
 """
+
+

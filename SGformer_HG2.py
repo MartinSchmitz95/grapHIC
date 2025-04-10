@@ -52,9 +52,9 @@ def full_attention_conv(qs, ks, vs, output_attn=False):
         return attn_output
 
 
-class GraphConvLayer(nn.Module):
+class HeteroGraphConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, use_weight=True, use_init=False):
-        super(GraphConvLayer, self).__init__()
+        super(HeteroGraphConvLayer, self).__init__()
 
         self.use_init = use_init
         self.use_weight = use_weight
@@ -88,7 +88,7 @@ class GraphConvLayer(nn.Module):
         return x
 
 
-class GraphConv(nn.Module):
+class AlternatingGraphConv(nn.Module):
     def __init__(
         self,
         in_channels,
@@ -101,7 +101,7 @@ class GraphConv(nn.Module):
         use_init=False,
         use_act=True,
     ):
-        super(GraphConv, self).__init__()
+        super(AlternatingGraphConv, self).__init__()
 
         self.convs = nn.ModuleList()
         self.fcs = nn.ModuleList()
@@ -110,10 +110,10 @@ class GraphConv(nn.Module):
         self.bns = nn.ModuleList()
         self.bns.append(nn.BatchNorm1d(hidden_channels))
         
-        # All layers process hidden_channels like in original SGformer.py
+        # Create layers that will alternate between edge types
         for _ in range(num_layers):
             self.convs.append(
-                GraphConvLayer(hidden_channels, hidden_channels, use_weight, use_init)
+                HeteroGraphConvLayer(hidden_channels, hidden_channels, use_weight, use_init)
             )
             self.bns.append(nn.BatchNorm1d(hidden_channels))
 
@@ -122,6 +122,7 @@ class GraphConv(nn.Module):
         self.use_bn = use_bn
         self.use_residual = use_residual
         self.use_act = use_act
+        self.num_layers = num_layers
 
     def reset_parameters(self):
         for conv in self.convs:
@@ -131,7 +132,7 @@ class GraphConv(nn.Module):
         for fc in self.fcs:
             fc.reset_parameters()
 
-    def forward(self, x, edge_index, edge_weight):
+    def forward(self, x, edge_index, edge_type, edge_weight):
         layer_ = []
 
         x = self.fcs[0](x)
@@ -143,7 +144,13 @@ class GraphConv(nn.Module):
         layer_.append(x)
 
         for i, conv in enumerate(self.convs):
-            x = conv(x, edge_index, edge_weight, layer_[0])
+            # Alternate between edge types (0 and 1)
+            edge_type_idx = i % 2
+            mask = edge_type == edge_type_idx
+            edge_index_i = edge_index[:, mask]
+            edge_weight_i = edge_weight[mask]
+            
+            x = conv(x, edge_index_i, edge_weight_i, layer_[0])
             if self.use_bn:
                 x = self.bns[i + 1](x)
             if self.use_act:
@@ -301,8 +308,7 @@ class SGFormer(nn.Module):
         trans_num_layers=1,
         trans_num_heads=1,
         trans_dropout=0.5,
-        gnn_num_layers_0=1,  # Number of layers for edge type 0
-        gnn_num_layers_1=1,  # Number of layers for edge type 1
+        gnn_num_layers=2,  # Total number of GNN layers (will alternate between edge types)
         gnn_dropout=0.5,
         gnn_use_weight=True,
         gnn_use_init=False,
@@ -331,23 +337,11 @@ class SGFormer(nn.Module):
             trans_use_act,
         )
         
-        # Create two separate GNNs with different numbers of layers
-        self.graph_conv_0 = GraphConv(
+        # Create a single GNN that alternates between edge types
+        self.graph_conv = AlternatingGraphConv(
             in_channels,
             hidden_channels,
-            gnn_num_layers_0,  # Different number of layers for type 0
-            gnn_dropout,
-            gnn_use_bn,
-            gnn_use_residual,
-            gnn_use_weight,
-            gnn_use_init,
-            gnn_use_act,
-        )
-        
-        self.graph_conv_1 = GraphConv(
-            in_channels,
-            hidden_channels,
-            gnn_num_layers_1,  # Different number of layers for type 1
+            gnn_num_layers,
             gnn_dropout,
             gnn_use_bn,
             gnn_use_residual,
@@ -358,9 +352,9 @@ class SGFormer(nn.Module):
         
         self.use_graph = use_graph
 
-        # Final layer always expects 3 * hidden_channels
+        # Final layer now expects 2 * hidden_channels (transformer + single GNN)
         self.fc = nn.Sequential(
-            nn.Linear(3 * hidden_channels, out_channels),
+            nn.Linear(2 * hidden_channels, out_channels),
             nn.Tanh()
         )
 
@@ -378,25 +372,16 @@ class SGFormer(nn.Module):
         x_trans = self.trans_conv(x, edge_type)
         
         if self.use_graph:
-            # Process edge type 0
-            mask_0 = edge_type == 0
-            edge_index_0 = edge_index[:, mask_0]
-            edge_weight_0 = edge_weight[mask_0]
-            x_graph_0 = self.graph_conv_0(x, edge_index_0, edge_weight_0)
+            # Process graph with alternating edge types
+            x_graph = self.graph_conv(x, edge_index, edge_type, edge_weight)
             
-            # Process edge type 1
-            mask_1 = edge_type == 1
-            edge_index_1 = edge_index[:, mask_1]
-            edge_weight_1 = edge_weight[mask_1]
-            x_graph_1 = self.graph_conv_1(x, edge_index_1, edge_weight_1)
-            
-            # Concatenate all embeddings [transformer, graph_type0, graph_type1]
-            x = torch.cat([x_trans, x_graph_0, x_graph_1], dim=1)
+            # Concatenate transformer and graph embeddings
+            x = torch.cat([x_trans, x_graph], dim=1)
         else:
             # If not using graph, pad with zeros to maintain dimension
             batch_size = x_trans.shape[0]
             hidden_dim = x_trans.shape[1]
-            padding = torch.zeros(batch_size, 2 * hidden_dim).to(x_trans.device)
+            padding = torch.zeros(batch_size, hidden_dim).to(x_trans.device)
             x = torch.cat([x_trans, padding], dim=1)
         
         x = self.fc(x)
@@ -409,5 +394,4 @@ class SGFormer(nn.Module):
     def reset_parameters(self):
         self.trans_conv.reset_parameters()
         if self.use_graph:
-            self.graph_conv_0.reset_parameters()
-            self.graph_conv_1.reset_parameters()
+            self.graph_conv.reset_parameters()

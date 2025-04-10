@@ -89,33 +89,22 @@ class GraphConvLayer(nn.Module):
 
 
 class GraphConv(nn.Module):
-    def __init__(
-        self,
-        in_channels,
-        hidden_channels,
-        num_layers=2,
-        dropout=0.5,
-        use_bn=True,
-        use_residual=True,
-        use_weight=True,
-        use_init=False,
-        use_act=True,
-    ):
+    def __init__(self, in_channels, out_channels, num_layers=2, dropout=0.5, use_bn=True, use_residual=True, use_weight=True, use_init=False, use_act=True):
         super(GraphConv, self).__init__()
 
         self.convs = nn.ModuleList()
         self.fcs = nn.ModuleList()
-        self.fcs.append(nn.Linear(in_channels, hidden_channels))
+        self.fcs.append(nn.Linear(in_channels, out_channels))
 
         self.bns = nn.ModuleList()
-        self.bns.append(nn.BatchNorm1d(hidden_channels))
+        self.bns.append(nn.BatchNorm1d(out_channels))
         
-        # All layers process hidden_channels like in original SGformer.py
+        # All layers process out_channels like in original SGformer.py
         for _ in range(num_layers):
             self.convs.append(
-                GraphConvLayer(hidden_channels, hidden_channels, use_weight, use_init)
+                GraphConvLayer(out_channels, out_channels, use_weight, use_init)
             )
-            self.bns.append(nn.BatchNorm1d(hidden_channels))
+            self.bns.append(nn.BatchNorm1d(out_channels))
 
         self.dropout = dropout
         self.activation = F.relu
@@ -292,7 +281,7 @@ class TransConv(nn.Module):
         return torch.stack(attentions, dim=0)  # [layer num, N, N]
 
 
-class SGFormer(nn.Module):
+class SGFormerSeed2(nn.Module):
     def __init__(
         self,
         in_channels,
@@ -315,6 +304,7 @@ class SGFormer(nn.Module):
         trans_use_weight=True,
         trans_use_act=True,
         use_graph=True,
+        seed_attention=True,  # New parameter to enable seed-specific attention
     ):
         super().__init__()
         
@@ -357,14 +347,24 @@ class SGFormer(nn.Module):
         )
         
         self.use_graph = use_graph
-
-        # Final layer always expects 3 * hidden_channels
+        self.hidden_channels = hidden_channels
+        self.seed_attention = seed_attention
+        
+        # Add seed-specific attention mechanism
+        if seed_attention:
+            self.seed_attn = nn.Sequential(
+                nn.Linear(2 * hidden_channels, hidden_channels),
+                nn.Tanh(),
+                nn.Linear(hidden_channels, 1)
+            )
+        
+        # Final layer now expects 4 * hidden_channels (3 from before + seed node embedding)
         self.fc = nn.Sequential(
-            nn.Linear(3 * hidden_channels, out_channels),
+            nn.Linear(4 * hidden_channels, out_channels),
             nn.Tanh()
         )
 
-    def forward(self, data):
+    def forward(self, data, seed_node=None):
         x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
         
         """# Remove columns 10 and 12 from x
@@ -391,15 +391,48 @@ class SGFormer(nn.Module):
             x_graph_1 = self.graph_conv_1(x, edge_index_1, edge_weight_1)
             
             # Concatenate all embeddings [transformer, graph_type0, graph_type1]
-            x = torch.cat([x_trans, x_graph_0, x_graph_1], dim=1)
+            x_combined = torch.cat([x_trans, x_graph_0, x_graph_1], dim=1)
         else:
             # If not using graph, pad with zeros to maintain dimension
             batch_size = x_trans.shape[0]
             hidden_dim = x_trans.shape[1]
             padding = torch.zeros(batch_size, 2 * hidden_dim).to(x_trans.device)
-            x = torch.cat([x_trans, padding], dim=1)
+            x_combined = torch.cat([x_trans, padding], dim=1)
         
-        x = self.fc(x)
+        # Process seed node embedding
+        if seed_node is not None:
+            # Get the seed node's embedding
+            if isinstance(seed_node, int):
+                seed_embedding = x_trans[seed_node]
+            else:
+                # If seed_node is a tensor, use it directly
+                seed_embedding = x_trans[seed_node]
+            
+            # Enhanced seed node processing with attention
+            if self.seed_attention:
+                # Calculate relationship between each node and seed node
+                seed_expanded = seed_embedding.unsqueeze(0).expand(x_trans.shape[0], -1)
+                node_seed_pairs = torch.cat([x_trans, seed_expanded], dim=1)
+                
+                # Compute attention scores
+                attn_scores = self.seed_attn(node_seed_pairs)
+                attn_weights = F.softmax(attn_scores, dim=0)
+                
+                # Apply attention weights to create seed-aware node embeddings
+                seed_aware_emb = x_trans * attn_weights
+                
+                # Add this as an additional feature
+                x_combined = torch.cat([x_combined, seed_aware_emb], dim=1)
+            else:
+                # Original approach: just expand and concatenate
+                seed_embedding = seed_embedding.unsqueeze(0).expand(x_combined.shape[0], -1)
+                x_combined = torch.cat([x_combined, seed_embedding], dim=1)
+        else:
+            # If no seed node provided, pad with zeros
+            padding = torch.zeros(x_combined.shape[0], self.hidden_channels).to(x_combined.device)
+            x_combined = torch.cat([x_combined, padding], dim=1)
+        
+        x = self.fc(x_combined)
         return x
 
     def get_attentions(self, x):

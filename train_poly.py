@@ -19,6 +19,14 @@ from SGformer_HG import SGFormer
 from torch_geometric.utils import degree
 import torch_sparse
 
+"""
+This method is not tested.
+I Do phasing in a n-D room here and extended the loss to work on it.
+I create a Jaccard distance between the labels and use it to calculate the loss.
+I hope to give  aclustering of points this way.
+As an evaluation, I calculate the intra-class and inter-class distances.
+
+"""
 class SwitchLoss(nn.Module):
     def __init__(self, lambda_1=1.0, lambda_2=1.0, lambda_3=1.0):
         super(SwitchLoss, self).__init__()
@@ -258,167 +266,6 @@ class HammingLoss(nn.Module):
 
         return loss
     
-def global_phasing_quotient(y_true, y_pred, chr, debug=False):
-    device = y_true.device
-    y_true = y_true.to(device)
-    y_pred = y_pred.to(device)
-    
-    def calculate_fractions(label, mask):
-        combined_mask = (y_true == label) & mask
-        preds = y_pred[combined_mask]
-        if len(preds) > 0:
-            sum_smaller_zero = (preds < 0).float().sum().item()
-            sum_larger_zero = (preds >= 0).float().sum().item()
-        else:
-            sum_smaller_zero = 0.0
-            sum_larger_zero = 0.0
-        return sum_smaller_zero, sum_larger_zero
-
-    # Get unique chromosomes
-    unique_chr = torch.unique(chr)
-    total_correct = 0
-    total_samples = 0
-
-    for c in unique_chr:
-        # Create mask for current chromosome
-        chr_mask = (chr == c)
-        
-        # Skip chromosomes with no valid labels
-        if not ((y_true[chr_mask] == 1).any() or (y_true[chr_mask] == -1).any()):
-            continue
-
-        # Calculate fractions for -1 and 1 for this chromosome
-        sum_neg1_smaller_zero, sum_neg1_larger_zero = calculate_fractions(-1, chr_mask)
-        sum_pos1_smaller_zero, sum_pos1_larger_zero = calculate_fractions(1, chr_mask)
-        
-        # Evaluate both combinations
-        combination1 = (sum_neg1_smaller_zero + sum_pos1_larger_zero)
-        combination2 = (sum_neg1_larger_zero + sum_pos1_smaller_zero)
-        chr_total = combination1 + combination2
-        
-        if chr_total > 0:  # Only include chromosomes with valid predictions
-            chr_correct = max(combination1, combination2)
-            total_correct += chr_correct
-            total_samples += chr_total
-            if debug:
-                print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
-
-    # Return metric based on all samples
-    if total_samples > 0:
-        final_metric = total_correct / total_samples
-        print(f"Global Phasing Quotient: {total_correct}/{total_samples} = {final_metric:.3f}")
-        return final_metric
-    else:
-        print("No valid samples found")
-        return 0.0
-    
-def local_phasing_quotient(y_true, y_pred, chr, edge_index, edge_type, debug=False):
-    if debug:
-        return local_phasing_quotient_debug(y_true, y_pred, chr, edge_index, edge_type)
-    else:
-        return local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type)
-
-def local_phasing_quotient_debug(y_true, y_pred, chr, edge_index, edge_type):
-    device = y_true.device
-    y_true = y_true.to(device)
-    y_pred = y_pred.to(device)
-    
-    # Get source and destination nodes
-    src_nodes = edge_index[0]
-    dst_nodes = edge_index[1]
-    
-    # Get unique chromosomes
-    unique_chr = torch.unique(chr)
-    total_correct = 0
-    total_edges = 0
-    
-    for c in unique_chr:
-        # Create combined mask for current chromosome
-        chr_mask = (
-            (edge_type == 0) &                           # overlap edges
-            (chr[src_nodes] == c) &                      # source node in current chromosome
-            (chr[dst_nodes] == c) &                      # destination node in current chromosome
-            (y_true[src_nodes] != 0) &                   # non-zero source labels
-            (y_true[dst_nodes] != 0)                     # non-zero destination labels
-        )
-        
-        if chr_mask.sum() == 0:
-            continue
-            
-        # Apply the mask for current chromosome
-        chr_src_nodes = src_nodes[chr_mask]
-        chr_dst_nodes = dst_nodes[chr_mask]
-        
-        # Get true labels and predictions for current chromosome
-        chr_src_true = y_true[chr_src_nodes]
-        chr_dst_true = y_true[chr_dst_nodes]
-        chr_src_pred = y_pred[chr_src_nodes]
-        chr_dst_pred = y_pred[chr_dst_nodes]
-        
-        # Calculate if predictions have same/different signs
-        chr_pred_same_phase = (chr_src_pred * chr_dst_pred) >= 0
-        chr_true_same_phase = (chr_src_true * chr_dst_true) >= 0
-        
-        # Count correct phasings for current chromosome
-        chr_correct = (chr_pred_same_phase == chr_true_same_phase).sum().item()
-        chr_total = chr_mask.sum().item()
-        
-        print(f"Chr {c} correct/total: {chr_correct}/{chr_total} = {chr_correct/chr_total:.3f}")
-            
-        total_correct += chr_correct
-        total_edges += chr_total
-    
-    if total_edges == 0:
-        print("No valid edges found")
-        return 0.0
-        
-    final_metric = total_correct / total_edges
-    print(f"Local Phasing Quotient: {total_correct}/{total_edges} = {final_metric:.3f}")
-    return final_metric
-
-def local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type):
-    device = y_true.device
-    y_true = y_true.to(device)
-    y_pred = y_pred.to(device)
-    
-    # Get source and destination nodes
-    src_nodes = edge_index[0]
-    dst_nodes = edge_index[1]
-    
-    # Create combined mask for all conditions at once
-    combined_mask = (
-        (edge_type == 0) &                           # overlap edges
-        (chr[src_nodes] == chr[dst_nodes]) &        # same chromosome
-        (y_true[src_nodes] != 0) &                  # non-zero source labels
-        (y_true[dst_nodes] != 0)                    # non-zero destination labels
-    )
-    
-    # Apply the combined mask once
-    src_nodes = src_nodes[combined_mask]
-    dst_nodes = dst_nodes[combined_mask]
-    
-    # Get true labels and predictions
-    src_true = y_true[src_nodes]
-    dst_true = y_true[dst_nodes]
-    src_pred = y_pred[src_nodes]
-    dst_pred = y_pred[dst_nodes]
-    
-    total_edges = combined_mask.sum().item()
-    if total_edges == 0:
-        print("No valid edges found")
-        return 0.0
-        
-    # Calculate if predictions have same/different signs
-    pred_same_phase = (src_pred * dst_pred) >= 0
-    true_same_phase = (src_true * dst_true) >= 0
-    
-    # Count correct phasings
-    total_correct = (pred_same_phase == true_same_phase).sum().item()
-    
-    final_metric = total_correct / total_edges
-    print(f"Local Phasing Quotient: {total_correct}/{total_edges} = {final_metric:.3f}")
-    return final_metric
-
 
 def train(model, data_path, train_selection, valid_selection, device, config):
     best_valid_loss = 10000
@@ -480,8 +327,6 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
         g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
 
         optimizer.zero_grad()
-        g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)    
-
         predictions = model(g).squeeze()
         
         pred_mean.append(predictions.mean().item())
@@ -560,6 +405,220 @@ def validate_epoch(model, valid_selection, data_path, device,
     
     return metrics
 
+class NDDistLoss(nn.Module):
+    def __init__(self, lambda_1=1.0, lambda_2=1.0, lambda_3=1.0, margin=1.0):
+        super(NDDistLoss, self).__init__()
+        self.lambda_1 = lambda_1  # Weight for same-label pairs
+        self.lambda_2 = lambda_2  # Weight for different-label pairs
+        self.lambda_3 = lambda_3  # Weight for L2 regularization
+        self.margin = margin      # Minimum distance for different-label pairs
+
+    def forward(self, y_true, y_pred, src, dst, chr, multi=True):
+        if multi:
+            return self.multi_chr_forward(y_true, y_pred, src, dst, chr)
+        else:
+            return self.single_chr_forward(y_true, y_pred, src, dst, chr)
+
+    def single_chr_forward(self, y_true, y_pred, src, dst, chr):
+        # Create random pairs of nodes
+        nodes = list(range(len(y_true)))
+        shuffled_nodes = nodes.copy()
+        random.shuffle(shuffled_nodes)
+
+        src = torch.tensor(nodes, device=y_true.device)
+        dst = torch.tensor(shuffled_nodes, device=y_true.device)
+
+        # Get labels and predictions for each pair
+        y_true_i = y_true[src]  # Now y_true is m-dimensional binary vector
+        y_true_j = y_true[dst]
+        y_pred_i = y_pred[src]  # y_pred is n-dimensional embedding
+        y_pred_j = y_pred[dst]
+
+        # Calculate Euclidean distances between pairs in n-dimensional space
+        distances = torch.sqrt(torch.sum((y_pred_i - y_pred_j) ** 2, dim=1) + 1e-8)
+
+        # Calculate label similarity using Jaccard similarity
+        # For binary vectors, intersection is element-wise minimum, union is element-wise maximum
+        intersection = torch.min(y_true_i, y_true_j)
+        union = torch.max(y_true_i, y_true_j)
+        
+        # Sum across label dimensions and add small epsilon to avoid division by zero
+        intersection_sum = torch.sum(intersection, dim=1)
+        union_sum = torch.sum(union, dim=1) + 1e-8
+        
+        # Jaccard similarity: |intersection| / |union|
+        label_similarity = intersection_sum / union_sum
+        
+        # Convert to distance: 1 - similarity
+        label_distance = 1.0 - label_similarity
+        
+        # Calculate the loss terms:
+        # 1. For similar labels: minimize distance proportional to label similarity
+        term_similar_labels = (1.0 - label_distance) * distances ** 2
+        
+        # 2. For different labels: push apart with margin proportional to label distance
+        target_distance = label_distance * self.margin
+        term_diff_labels = label_distance * torch.max(
+            torch.zeros_like(distances), 
+            target_distance - distances
+        ) ** 2
+        
+        # 3. L2 regularization on embeddings to prevent them from growing too large
+        l2_reg = torch.mean(torch.sum(y_pred ** 2, dim=1))
+
+        # Combine the terms with the weights
+        loss = (self.lambda_1 * term_similar_labels.mean() +
+                self.lambda_2 * term_diff_labels.mean() +
+                self.lambda_3 * l2_reg)
+
+        return loss
+
+    def multi_chr_forward(self, y_true, y_pred, src, dst, chr):
+        # Get unique chromosomes and their counts
+        unique_chr, chr_counts = torch.unique(chr, return_counts=True)
+        
+        # Filter out chromosomes with less than 2 nodes
+        valid_mask = chr_counts >= 2
+        unique_chr = unique_chr[valid_mask]
+        
+        if len(unique_chr) == 0:
+            return torch.tensor(0.0, device=y_true.device, requires_grad=True)
+
+        # Create a mask tensor for all chromosomes at once
+        chr_masks = chr.unsqueeze(0) == unique_chr.unsqueeze(1)  # Broadcasting
+        
+        # Initialize tensors to store results for all chromosomes
+        all_true_i = []
+        all_true_j = []
+        all_pred_i = []
+        all_pred_j = []
+        
+        for idx, mask in enumerate(chr_masks):
+            # Get nodes for current chromosome
+            chr_nodes = torch.where(mask)[0]
+            
+            # Create shuffled pairs within chromosome
+            shuffled_indices = torch.randperm(len(chr_nodes))
+            
+            # Gather the values using the masks
+            all_true_i.append(y_true[chr_nodes])
+            all_true_j.append(y_true[chr_nodes[shuffled_indices]])
+            all_pred_i.append(y_pred[chr_nodes])
+            all_pred_j.append(y_pred[chr_nodes[shuffled_indices]])
+
+        # Stack all tensors
+        y_true_i = torch.cat(all_true_i)
+        y_true_j = torch.cat(all_true_j)
+        y_pred_i = torch.cat(all_pred_i)
+        y_pred_j = torch.cat(all_pred_j)
+
+        # Calculate distances between pairs in n-dimensional space
+        distances = torch.sqrt(torch.sum((y_pred_i - y_pred_j) ** 2, dim=1) + 1e-8)
+
+        # Calculate label similarity using Jaccard similarity
+        intersection = torch.min(y_true_i, y_true_j)
+        union = torch.max(y_true_i, y_true_j)
+        
+        intersection_sum = torch.sum(intersection, dim=1)
+        union_sum = torch.sum(union, dim=1) + 1e-8
+        
+        label_similarity = intersection_sum / union_sum
+        label_distance = 1.0 - label_similarity
+
+        # Calculate loss terms
+        term_similar_labels = (1.0 - label_distance) * distances ** 2
+        
+        target_distance = label_distance * self.margin
+        term_diff_labels = label_distance * torch.max(
+            torch.zeros_like(distances), 
+            target_distance - distances
+        ) ** 2
+        
+        # L2 regularization on all embeddings
+        l2_reg = torch.mean(torch.sum(y_pred ** 2, dim=1))
+
+        # Calculate the final loss by averaging across all samples
+        loss = (self.lambda_1 * term_similar_labels.mean() +
+                self.lambda_2 * term_diff_labels.mean() +
+                self.lambda_3 * l2_reg)
+
+        return loss
+
+def evaluate_embeddings(model, data_loader, device):
+    model.eval()
+    all_embeddings = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for batch in data_loader:
+            batch = batch.to(device)
+            embeddings = model(batch)  # Get n-dimensional embeddings
+            all_embeddings.append(embeddings)
+            all_labels.append(batch.y)
+    
+    embeddings = torch.cat(all_embeddings, dim=0).cpu().numpy()
+    labels = torch.cat(all_labels, dim=0).cpu().numpy()
+    
+    # Calculate intra-class and inter-class distances
+    intra_class_distances = []
+    inter_class_distances = []
+    
+    # For each label dimension (assuming multi-hot encoding)
+    for label_dim in range(labels.shape[1]):
+        # Get embeddings for samples with this label
+        pos_mask = labels[:, label_dim] == 1
+        neg_mask = labels[:, label_dim] == 0
+        
+        if np.sum(pos_mask) > 1:  # Need at least 2 samples
+            pos_embeddings = embeddings[pos_mask]
+            
+            # Calculate pairwise distances within this class
+            dists = pairwise_distances(pos_embeddings)
+            # Get upper triangle of distance matrix (excluding diagonal)
+            intra_dists = dists[np.triu_indices(len(pos_embeddings), k=1)]
+            intra_class_distances.append(np.mean(intra_dists))
+        
+        if np.sum(pos_mask) > 0 and np.sum(neg_mask) > 0:
+            # Calculate distances between this class and other classes
+            pos_embeddings = embeddings[pos_mask]
+            neg_embeddings = embeddings[neg_mask]
+            
+            # Calculate pairwise distances between classes
+            dists = pairwise_distances(pos_embeddings, neg_embeddings)
+            inter_class_distances.append(np.mean(dists))
+    
+    metrics = {
+        'intra_class_distance': np.mean(intra_class_distances),
+        'inter_class_distance': np.mean(inter_class_distances),
+        'distance_ratio': np.mean(inter_class_distances) / np.mean(intra_class_distances)
+    }
+    
+    return metrics
+
+def pairwise_distances(X, Y=None):
+    """Compute pairwise Euclidean distances using PyTorch."""
+    if not isinstance(X, torch.Tensor):
+        X = torch.tensor(X, dtype=torch.float32)
+    
+    if Y is None:
+        Y = X
+    elif not isinstance(Y, torch.Tensor):
+        Y = torch.tensor(Y, dtype=torch.float32)
+    
+    # Compute squared Euclidean distance
+    X_norm = torch.sum(X**2, dim=1, keepdim=True)
+    if Y is X:
+        Y_norm = X_norm.T
+    else:
+        Y_norm = torch.sum(Y**2, dim=1, keepdim=True).T
+    
+    distances = X_norm + Y_norm - 2 * torch.matmul(X, Y.T)
+    # Handle numerical errors
+    distances = torch.clamp(distances, min=0.0)
+    
+    return torch.sqrt(distances)
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="experiment eval script")
@@ -605,7 +664,6 @@ if __name__ == '__main__':
         config = yaml.safe_load(file)['training']
 
     train_utils.set_seed(args.seed)
-   
     model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers_0=config['num_gnn_layers_overlap'], gnn_num_layers_1=config['num_gnn_layers_hic'], gnn_dropout=config['gnn_dropout']).to(device)
     #model = MultiSGFormer(num_sgformers=3, in_channels=2, hidden_channels=128, out_channels=1, trans_num_layers=2, gnn_num_layers=4, gnn_dropout=0.0).to(device)
 
