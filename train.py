@@ -15,7 +15,7 @@ import yaml
 # Disable
 #from torch_geometric.utils import to_undirected
 
-from SGformer_HG import SGFormer
+from SGformer2 import SGFormer
 from torch_geometric.utils import degree
 import torch_sparse
 
@@ -477,10 +477,11 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
 
     for idx, graph_name in enumerate(train_selection):
         print(f"Training graph {graph_name}, id: {idx} of {len(train_selection)}")
-        g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
+        g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
 
         optimizer.zero_grad()
-        g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)    
+        #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)    
+        g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
 
         predictions = model(g).squeeze()
         
@@ -527,7 +528,8 @@ def validate_epoch(model, valid_selection, data_path, device,
     with torch.no_grad():
         for idx, graph_name in enumerate(valid_selection):
             print(f"Validating graph {graph_name}, id: {idx} of {len(valid_selection)}")
-            g = torch.load(os.path.join(data_path, graph_name + '.pt')).to(device)
+            g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
+            g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
 
             predictions = model(g).squeeze()
             valid_pred_mean.append(predictions.mean().item())
@@ -606,7 +608,7 @@ if __name__ == '__main__':
 
     train_utils.set_seed(args.seed)
    
-    model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers_0=config['num_gnn_layers_overlap'], gnn_num_layers_1=config['num_gnn_layers_hic'], gnn_dropout=config['gnn_dropout']).to(device)
+    model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers=config['num_gnn_layers_overlap'], gnn_dropout=config['gnn_dropout']).to(device)
     #model = MultiSGFormer(num_sgformers=3, in_channels=2, hidden_channels=128, out_channels=1, trans_num_layers=2, gnn_num_layers=4, gnn_dropout=0.0).to(device)
 
     #latest change: half hidden channels, reduce gnn_layers, remove dropout

@@ -25,12 +25,12 @@ gen_config:
 gen_steps:
   sample_reads: False
   create_graphs: False
-  parse_gfa: False
+  parse_gfa: True
   hic: False
   pile-o-gram: False
   diploid_features: False
   ground_truth: False
-  ml_graphs: True
+  ml_graphs: False
 nfcore_hic:
   # using dnase mode
   dnase: True
