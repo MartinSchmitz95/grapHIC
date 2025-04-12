@@ -212,7 +212,7 @@ def train(model, data_path, train_selection, valid_selection, device, config):
             
             # Only include separation metrics if evaluation is enabled
             if config['evaluate']:
-                train_metrics['hap_separation'] = hap_separation
+                valid_metrics['hap_separation'] = hap_separation
 
             # Log metrics
             log_dict = {**train_metrics}
@@ -340,10 +340,11 @@ def validate_epoch(model, valid_selection, data_path, device,
                 print(f"Graph Validation Loss: {graph_loss:.4f}")
             else:
                 print("No valid chromosomes found in this graph")
+                exit()
     
     # Calculate average metrics
     metrics = {
-        'valid_loss': np.mean(valid_loss) if valid_loss else 0.0,
+        'valid_loss': np.mean(valid_loss)
     }
     
     print(f"Average Validation Loss: {metrics['valid_loss']:.4f}")
