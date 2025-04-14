@@ -10,7 +10,7 @@ process MAKE_HIC_EDGES {
     path(utg_dict)
 
     output:
-    tuple val(meta), path("*.nx.pkl"), emit: graph
+    tuple val(meta), path("contacts.nx.pkl"), emit: graph
     path ("versions.yml")            , emit: versions
 
     when:

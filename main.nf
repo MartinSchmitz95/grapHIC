@@ -4,12 +4,12 @@ nextflow.enable.dsl = 2
 
 // collection to start writing a main nextflow pipeline
 
-include { HIC            } from './workflows/hic'
-include { INPUT_CHECK    } from './subworkflows/local/input_check'
-include { GFA_TO_GRAPH   } from './modules/local/gfa_to_graph'
-include { GFA_TO_FA      } from './modules/local/gfa_to_fa'
-include { MAKE_HIC_EDGES } from './modules/local/descongelador'
-include { HIFIASM        } from './modules/nf-core/hifiasm'
+include { HIC           } from './workflows/hic'
+include { INPUT_CHECK   } from './subworkflows/local/input_check'
+include { GFA_TO_GRAPH  } from './modules/local/gfa_to_graph'
+include { GFA_TO_FA     } from './modules/local/gfa_to_fa'
+include { ADD_HIC_EDGES } from './modules/local/descongelador'
+include { HIFIASM       } from './modules/nf-core/hifiasm'
 
 
 workflow GRAPHIC{
@@ -45,10 +45,8 @@ workflow GRAPHIC{
 		// convert to [id, reads1, reads2]
 	)
 
-	// transform to graph structure
-	MAKE_HIC_EDGES(HIC.out.cool, GFA_TO_GRAPH.out.utg_graph, GFA_TO_GRAPH.out.utg_to_node)
-
-	// merge graphs
+	// transform to graph structure, add hic edges
+	ADD_HIC_EDGES(HIC.out.cool, GFA_TO_GRAPH.out.utg_graph, GFA_TO_GRAPH.out.utg_to_node)
 
 	// emit as training dataset
 
