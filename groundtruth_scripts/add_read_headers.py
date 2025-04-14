@@ -1,6 +1,12 @@
 #!/bin/env python3
 
 import gzip
+from collections import defaultdict
+from functools import reduce
+
+import networkx as nx
+import pickle as pkl
+
 
 ## thoughts
 ## - write generator over read ids
@@ -9,6 +15,20 @@ import gzip
 ## => VCFs as global state or fn args?
 ## => figure out vcf parsing => pysam?
 
+def load_pickle(filepath) -> Dict:
+    ret = None
+    with open(filepath, 'rb') as f:
+        ret = pickle.load(f)
+    return ret
+
+def save_pickle(obj, filepath):
+    with open(filepath, 'wb') as f:
+        ret = pickle.dump(obj, f)
+
+#TODO make call to handle het/homozygous
+# set zygosity mapping as global variable?
+def check_zygosity(chrid, start, end):
+    return 'E' # for now, everything is hEterozygous
 
 
 def iter_reads(inpath, gzipped=True):
@@ -33,19 +53,38 @@ def iter_reads(inpath, gzipped=True):
             start, end = int(pos[2].split('-')[0]), int(pos[2].split('-')[1])
             assert start <= end and start >= 0 and end >= 0
 
-            zygosity = check_zygosity(chr_id, start, end)
-
-            yield (idx, {'chr': chr_id, 'strand': strand, 'start': start, 'end': end, 'zygosity' = zygosity})
+            yield (idx, {'chr': chr_id, 'strand': strand, 'start': start, 'end': end})
 
 
 def main(fastq_path, nx_path, read_to_node_dict_path, outpath):
-    pass
+    graph = load_pickle(nx_path)
+    r2n = load_pickle(read_to_node_dict_path)
 
+    ## group read headers by unitig ID
+    utg_reads = defaultdict(list)
+    for idx, vals in iter_reads(fastq_path):
+        utg_reads[r2n[idx]].append(vals)
 
-#TODO make call to handle het/homozygous
-# set zygosity mapping as global variable?
-def check_zygosity(chrid, start, end):
-    return 'E' # for now, everything is hEterozygous
+    ## set values for each unitig
+    utg_vals = dict()
+    for idx, headers in utg_reads:
+        # check CHR and strand is matching
+        assert reduce(lambda x, y: x == y, h['chr'] for h in headers)
+        assert reduce(lambda x, y: x == y, h['strand'] for h in headers)
+
+        # start is the earliest, end is the latest of all reads mapping to a utig
+        start = min(h['start'] for h in headers)
+        end = max(h['end'] for h in headers)
+
+        zygosity = check_zygosity(h[0]['chr'], start, end)
+
+        utg_vals[idx] = {'chr': h[0]['chr'], 'strand': h[0]['strand'], 'start': start, 'end': end, 'zygosity': zygosity}
+
+    ## then add to graph and save to output
+    nx.set_node_attributes(graph, utg_vals)
+
+    save_pickle(graph, outpath)
+
 
 if __name__ == '__main__':
     import argparse as ap
