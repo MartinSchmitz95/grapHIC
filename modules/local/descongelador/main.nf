@@ -1,4 +1,4 @@
-process MAKE_HIC_EDGES {
+process ADD_HIC_EDGES {
     tag "$meta.id"
     label 'process_single'
 
