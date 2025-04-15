@@ -62,7 +62,6 @@ def iter_badreads_fastq(inpath, gzipped=True):
 #
 # a
 # s ref   START   LEN +   END ACCTA
-# s ref   START   LEN +   END ACCTA
 # s SXX_YY   START   LEN +   END ACCTA
 
 def iter_pbsim_maf(inpath, chrlist, gzipped=True):
@@ -72,7 +71,23 @@ def iter_pbsim_maf(inpath, chrlist, gzipped=True):
     """
 
     with gzip.open(inpath, "rt") if gzipped else open(inpath, "rt") as file:
+        lineiter = iter(file)
+        
+        for line in lineiter:
+            # parse in bunches of three lines, starting with an 'a' line
+            if line[0] == 'a':
+                # store both lines as metadata array, skip sequence and initial s
+                refline, readline = next(lineiter).split('\t')[1:-1], next(lineiter).split('\t')[1:-1]
+                idx = readline[0]
+                start = int(refline[1])
+                end = start + int(seqline[2]) # doesn't seem to store end directly? => add len
+                strand = seqline[3]
+                # chr corresponds to no in ID
+                chr_id = chrlist[int(idx[1:].split('_')[0])]
 
+                yield (idx, {'chr': chr_id, 'strand': strand, 'start': start, 'end': end})
+            elif line:
+                print("ERROR: Non-empty line encountered without preceding 'a' line")
 
 
 def main(inpath, nx_path, read_to_node_dict_path, outpath, badreads=True):
