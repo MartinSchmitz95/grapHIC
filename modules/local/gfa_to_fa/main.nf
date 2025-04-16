@@ -14,8 +14,9 @@ process GFA_TO_FA {
     task.ext.when == null || task.ext.when
 
     script:
-    def args = task.ext.args ?: ''
-	 def compress = true
+    def args         = task.ext.args ?: ''
+	 def compress     = true
+    def prefix       = task.ext.prefix ?: "${meta.id}"
     def write_output = compress ? "| gzip > ${prefix}.fa.gzs" : "> ${prefix}.fa"
     """
 	 awk '/^S/{print \">\"\$2;print \$3}' ${gfa} ${write_output}
