@@ -325,7 +325,7 @@ def validate_epoch(model, valid_selection, data_path, device,
                 # Get phasing embeddings and haplotype labels for sampled nodes
                 sampled_projections = phasing_projections[sampled_indices]
                 sampled_labels = g.hap_gt[sampled_indices].to(device)
-                    
+                
                 # Compute loss for this chromosome - ensure edge_index is on the correct device
                 loss = multi_adaptive_clustering_loss(sampled_projections, sampled_labels, g.edge_index.to(device), device=device)
                 #loss = phasing_loss(sampled_projections, sampled_labels)

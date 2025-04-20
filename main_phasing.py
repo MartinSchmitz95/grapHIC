@@ -238,6 +238,10 @@ def phasing_clustering_from_gt(chr_labels, hap_labels, graph_path, device="cpu")
     next_label = 0
     metrics = {}
     
+    # For tracking bases in each bin
+    bin_base_counts = {}
+    chr_stats = {}
+    
     # For each chromosome
     for chr_id in unique_chr_ids:
         # Get indices of nodes in this chromosome
@@ -245,24 +249,112 @@ def phasing_clustering_from_gt(chr_labels, hap_labels, graph_path, device="cpu")
         chr_mask = chr_labels == chr_id
         chr_indices = np.where(chr_mask)[0]
         
+        # Count haplotype labels for this chromosome
+        hap_minus_one_count = np.sum(hap_labels[chr_indices] == -1)
+        hap_zero_count = np.sum(hap_labels[chr_indices] == 0)
+        hap_plus_one_count = np.sum(hap_labels[chr_indices] == 1)
+        total_nodes = len(chr_indices)
+        
+        # Initialize base counts for this chromosome's bins
+        hap1_bin = next_label
+        hap2_bin = next_label + 1
+        bin_base_counts[hap1_bin] = 0
+        bin_base_counts[hap2_bin] = 0
+        
+        # Initialize chromosome statistics
+        chr_stats[chr_id] = {
+            'hap1_only_bases': 0,  # Bases only in haplotype 1
+            'hap2_only_bases': 0,  # Bases only in haplotype 2
+            'homozygous_bases': 0,  # Bases in both haplotypes
+            'total_bases': 0       # Total bases across both haplotypes
+        }
+        
+        print(f"  Chromosome {chr_id} statistics:")
+        print(f"    Total nodes: {total_nodes}")
+        print(f"    Haplotype -1 (first haplotype): {hap_minus_one_count} ({hap_minus_one_count/total_nodes:.2%})")
+        print(f"    Haplotype  0 (homozygous): {hap_zero_count} ({hap_zero_count/total_nodes:.2%})")
+        print(f"    Haplotype +1 (second haplotype): {hap_plus_one_count} ({hap_plus_one_count/total_nodes:.2%})")
+        
         # For each node in this chromosome
         for i in chr_indices:
+            # Get the node's sequence length from the feature matrix
+            # The read_length is at index 2 in the feature matrix
+            node_id = graph.original_id[i].item()
+            node_length = graph.x[i, 2].item()   # Get the normalized read length
+            
             if hap_labels[i] == -1:
                 # Add to first bin of chromosome
                 final_labels[i].append(next_label)
+                bin_base_counts[hap1_bin] += node_length
+                chr_stats[chr_id]['hap1_only_bases'] += node_length
+                chr_stats[chr_id]['total_bases'] += node_length
             elif hap_labels[i] == 1:
                 # Add to second bin of chromosome
                 final_labels[i].append(next_label + 1)
+                bin_base_counts[hap2_bin] += node_length
+                chr_stats[chr_id]['hap2_only_bases'] += node_length
+                chr_stats[chr_id]['total_bases'] += node_length
             elif hap_labels[i] == 0:
                 # Add to both bins of chromosome (homozygous)
                 final_labels[i].append(next_label)
                 final_labels[i].append(next_label + 1)
+                bin_base_counts[hap1_bin] += node_length
+                bin_base_counts[hap2_bin] += node_length
+                chr_stats[chr_id]['homozygous_bases'] += node_length
+                chr_stats[chr_id]['total_bases'] += node_length * 2  # Count twice since it's in both haplotypes
+            else:
+                print(f"Unknown haplotype label: {hap_labels[i]}")
+                exit()
+        
+        # Calculate total unique bases (counting homozygous regions only once)
+        unique_bases = chr_stats[chr_id]['hap1_only_bases'] + chr_stats[chr_id]['hap2_only_bases'] + chr_stats[chr_id]['homozygous_bases']
+        
+        # Print base counts and percentages for this chromosome
+        print(f"    Base pair statistics:")
+        print(f"      Haplotype 1 (bin {hap1_bin}) total bases: {bin_base_counts[hap1_bin]:,}")
+        print(f"      Haplotype 2 (bin {hap2_bin}) total bases: {bin_base_counts[hap2_bin]:,}")
+        
+        # Only print percentages if we have bases
+        if unique_bases > 0:
+            print(f"      Haplotype 1 only bases: {chr_stats[chr_id]['hap1_only_bases']:,} ({chr_stats[chr_id]['hap1_only_bases']/unique_bases:.2%} of unique bases)")
+            print(f"      Haplotype 2 only bases: {chr_stats[chr_id]['hap2_only_bases']:,} ({chr_stats[chr_id]['hap2_only_bases']/unique_bases:.2%} of unique bases)")
+            print(f"      Homozygous bases: {chr_stats[chr_id]['homozygous_bases']:,} ({chr_stats[chr_id]['homozygous_bases']/unique_bases:.2%} of unique bases)")
+            print(f"      Total unique bases: {unique_bases:,}")
+        else:
+            print(f"      No sequence length information available for this chromosome")
         
         # Move to next chromosome (2 bins per chromosome)
         next_label += 2
     
+    # Calculate global statistics
+    total_hap1_only = sum(stats['hap1_only_bases'] for stats in chr_stats.values())
+    total_hap2_only = sum(stats['hap2_only_bases'] for stats in chr_stats.values())
+    total_homozygous = sum(stats['homozygous_bases'] for stats in chr_stats.values())
+    total_unique_bases = total_hap1_only + total_hap2_only + total_homozygous
+    total_bin_bases = sum(bin_base_counts.values())
+    
+    print("\nGlobal statistics:")
+    print(f"  Total bins created: {next_label}")
+    print(f"  Total bases across all bins: {total_bin_bases:,}")
+    
+    if total_unique_bases > 0:
+        print(f"  Total unique bases: {total_unique_bases:,}")
+        print(f"  Haplotype 1 only bases: {total_hap1_only:,} ({total_hap1_only/total_unique_bases:.2%} of unique bases)")
+        print(f"  Haplotype 2 only bases: {total_hap2_only:,} ({total_hap2_only/total_unique_bases:.2%} of unique bases)")
+        print(f"  Homozygous bases: {total_homozygous:,} ({total_homozygous/total_unique_bases:.2%} of unique bases)")
+    else:
+        print("  No sequence length information available")
+    
     metrics['n_final_clusters'] = next_label
-    print(f"Created {next_label} clusters from ground truth labels")
+    metrics['bin_base_counts'] = bin_base_counts
+    metrics['chr_stats'] = chr_stats
+    metrics['global_stats'] = {
+        'total_hap1_only': total_hap1_only,
+        'total_hap2_only': total_hap2_only,
+        'total_homozygous': total_homozygous,
+        'total_unique_bases': total_unique_bases,
+        'total_bin_bases': total_bin_bases
+    }
     
     # Convert to dictionary mapping original node IDs to labels
     final_labels_dict = {}
@@ -321,7 +413,6 @@ def main():
         )"""
     
     fuzzy_labels, metrics = phasing_clustering_from_gt(chr_labels, hap_labels, args.graph_path, args.device)
-
     if args.inference:
         inference_phasing.main(
             fuzzy_labels,

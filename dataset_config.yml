@@ -26,11 +26,11 @@ gen_steps:
   sample_reads: False
   create_graphs: False
   parse_gfa: True
-  hic: False
+  hic: True
   pile-o-gram: False
   diploid_features: False
-  ground_truth: False
-  ml_graphs: False
+  ground_truth: True
+  ml_graphs: True
 nfcore_hic:
   # using dnase mode
   dnase: True

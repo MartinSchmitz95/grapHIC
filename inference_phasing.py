@@ -51,33 +51,39 @@ def save_fastas(chr_labels, n2s_path, binned_dir):
     reads_dict = {record.id: record for record in reads}
     
     # Create a dictionary to store reads for each bin
+    # Using sets of read IDs to track which reads are already in each bin
     binned_reads = {}
-
-    # Process each node and assign its reads to the appropriate bin
-    for node_id, bin_label in tqdm(chr_labels.items(), total=len(chr_labels), desc="Binning reads"):
-        # Get both the node ID and its complement (n^1)
-        node_ids_to_process = [int(node_id)]
-        complement_node_id = int(node_id) ^ 1  # XOR with 1 to get complement node
-        node_ids_to_process.append(complement_node_id)
+    binned_read_ids = {}
+    
+    # Process chromosome labels to bin reads
+    print("Binning reads based on chromosome labels...")
+    for node_id, bin_labels in tqdm(chr_labels.items(), desc="Processing node labels"):
+        # Ensure bin_labels is a list
+        if not isinstance(bin_labels, list):
+            bin_labels = [bin_labels]
         
-        for node_id_to_process in node_ids_to_process:
-            # Skip if no read for this node
-            if str(node_id_to_process) not in reads_dict:
-                continue
-                
-            # Handle bin_label as a list - add the read to each bin in the list
-            if isinstance(bin_label, list):
-                for single_bin in bin_label:
-                    bin_key = str(single_bin)
-                    if bin_key not in binned_reads:
-                        binned_reads[bin_key] = []
-                    binned_reads[bin_key].append(reads_dict[str(node_id_to_process)])
-            else:
-                # Handle single bin label
-                bin_key = str(bin_label)
-                if bin_key not in binned_reads:
-                    binned_reads[bin_key] = []
-                binned_reads[bin_key].append(reads_dict[str(node_id_to_process)])
+        # Calculate paired node ID using bitwise XOR with 1
+        paired_node_id = node_id ^ 1
+        
+        # Get the reads for this node and its paired node
+        node_read = reads_dict[node_id]
+        paired_read = reads_dict[paired_node_id]
+        
+        # Add the reads to each bin they belong to
+        for bin_label in bin_labels:
+            if bin_label not in binned_reads:
+                binned_reads[bin_label] = []
+                binned_read_ids[bin_label] = set()
+            
+            # Add node read if it exists and hasn't been added yet
+            if node_read and str(node_id) not in binned_read_ids[bin_label]:
+                binned_reads[bin_label].append(node_read)
+                binned_read_ids[bin_label].add(str(node_id))
+            
+            # Add paired read if it exists and hasn't been added yet
+            if paired_read and str(paired_node_id) not in binned_read_ids[bin_label]:
+                binned_reads[bin_label].append(paired_read)
+                binned_read_ids[bin_label].add(str(paired_node_id))
     
     # Create output directory for binned fastas if it doesn't exist
     os.makedirs(binned_dir, exist_ok=True)
@@ -86,7 +92,10 @@ def save_fastas(chr_labels, n2s_path, binned_dir):
     for bin_label, bin_reads in tqdm(binned_reads.items(), total=len(binned_reads), desc="Writing FASTA files"):
         output_file = os.path.join(binned_dir, f"bin_{bin_label}.fasta")
         SeqIO.write(bin_reads, output_file, "fasta")
-        print(f"Wrote {len(bin_reads)} reads to {output_file}")
+        
+        # Calculate the combined length of all reads in the bin
+        total_length = sum(len(read.seq) for read in bin_reads)
+        print(f"Wrote {len(bin_reads)} reads to {output_file} (Total length: {total_length:,} bp)")
     
 
 def run_hifiasm(binned_dir, output_dir, hifiasm_path, merged_fasta):
@@ -275,7 +284,7 @@ def main(chr_labels, n2s_path, output_dir, hifiasm_path="/home/schmitzmf/hifiasm
 
     merged_fasta = os.path.join(output_dir, "merged_assembly.fasta")
     print(f"Inference: Running hifiasm on each bin and merging results...")
-    run_hifiasm(binned_dir, output_dir, hifiasm_path, merged_fasta)
+    #run_hifiasm(binned_dir, output_dir, hifiasm_path, merged_fasta)
 
     if mat_yak and pat_yak and ref:
         eval_fasta(merged_fasta, ref, output_dir, mat_yak, pat_yak)

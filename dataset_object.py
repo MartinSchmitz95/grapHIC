@@ -534,8 +534,11 @@ class HicDatasetCreator:
                         print(f"Unknown line type: {line}")
                         exit()
                     if training:
-                        #print(f"id: {id}")
+
                         if type(id) != list:
+                            print(f"id: {id}") 
+                            print("id not a list!!!!!!!!!")
+                            exit()
                             description = read_headers[id]
                             # desc_id, strand, start, end = description.split()
                             strand = re.findall(r'strand=(\+|\-)', description)[0]
@@ -1294,7 +1297,7 @@ class HicDatasetCreator:
         
         # Process each edge type
         edge_type_map = {'overlap': 0, 'hic': 1}
-        
+
         # Convert edges for each type
         for (u, v, key, data) in nx_graph.edges(data=True, keys=True):
             edge_type = data.get('type')  # Get edge type
