@@ -235,4 +235,5 @@ def main(args):
     process_gfa_to_files(args.infile.name, args.utg_to_node.name, args.utg_to_reads.name, args.utg_graph.name)
 
 if __name__ == '__main__':
+    import sys
     main(sys.argv)
