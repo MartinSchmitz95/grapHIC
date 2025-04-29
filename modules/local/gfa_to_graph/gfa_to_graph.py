@@ -37,7 +37,7 @@ def nx_from_gfa(gfa_path, diploid=False):
     unitig_2_node = {}
     utg_2_reads = {}
     #edges_dict = {}
-    read_lengths, read_seqs, covs = {}, {}  # Obtained from the GFA
+    read_lengths, read_seqs, covs = {}, {}, {}  # Obtained from the GFA
     read_idxs, read_strands, read_starts, read_ends, read_chrs, read_variants, variant_class = {}, {}, {}, {}, {}, {}, {}  # Obtained from the FASTA/Q headers
     edge_ids, prefix_lengths, overlap_lengths, overlap_similarities = {}, {}, {}, {}
 
