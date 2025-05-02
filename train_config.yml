@@ -6,6 +6,7 @@ training:
   num_trans_layers: 3
   hidden_features: 512
   emb_dim: 128
+  use_standard_attention: False
   projection_dim: 16
   node_features: 1
   gnn_dropout: 0.0

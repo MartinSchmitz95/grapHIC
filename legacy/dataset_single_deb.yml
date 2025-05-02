@@ -25,11 +25,11 @@ gen_config:
 gen_steps:
   sample_reads: False
   create_graphs: False
-  parse_gfa: False
-  hic: False
+  parse_gfa: True
+  hic: True
   pile-o-gram: False
   diploid_features: False
-  ground_truth: False
+  ground_truth: True
   ml_graphs: True
 nfcore_hic:
   # using dnase mode
@@ -74,6 +74,15 @@ nextflow: |
       }
   }
 training:
-  i002c_v04.multi_21: 3
+  i002c_v04_multi_21.chr2: 3
+  i002c_v04_multi_21.chr3: 3
+  i002c_v04_multi_21.chr4: 3
+  i002c_v04_multi_21.chr7: 1
+  i002c_v04_multi_21.chr8: 3
 
 validation:
+  i002c_v04_multi_21.chr15: 1
+  i002c_v04_multi_21.chr16: 1
+  i002c_v04_multi_21.chr18: 1
+  i002c_v04_multi_21.chr13: 1
+

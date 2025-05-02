@@ -18,6 +18,7 @@ import yaml
 from SGformer2 import SGFormer
 from torch_geometric.utils import degree
 import torch_sparse
+from GraphTransformer import GraphTransformer2 as GraphTransformer
 
 class SwitchLoss(nn.Module):
     def __init__(self, lambda_1=1.0, lambda_2=1.0, lambda_3=1.0):
@@ -610,6 +611,7 @@ if __name__ == '__main__':
    
     model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers=config['num_gnn_layers_overlap'], gnn_dropout=config['gnn_dropout']).to(device)
     #model = MultiSGFormer(num_sgformers=3, in_channels=2, hidden_channels=128, out_channels=1, trans_num_layers=2, gnn_num_layers=4, gnn_dropout=0.0).to(device)
+    #model = GraphTransformer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1).to(device)
 
     #latest change: half hidden channels, reduce gnn_layers, remove dropout
     to_undirected = False

@@ -89,7 +89,7 @@ class HicDatasetCreator:
                 os.makedirs(folder)
 
         #self.edge_attrs = ['overlap_length', 'overlap_similarity', 'prefix_length']
-        self.node_attrs = ['overlap_degree', 'hic_degree', 'read_length', 'hic_neighbor_weight', 'support']#, 'cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']
+        self.node_attrs = ['overlap_degree', 'hic_degree', 'read_length', 'hic_neighbor_weight'] #, 'support']#, 'cov_avg', 'cov_pct', 'cov_med', 'cov_std', 'read_gc']
 
     def load_chromosome(self, genome, chr_id, ref_path):
         self.genome_str = f'{genome}_{chr_id}'
@@ -404,14 +404,39 @@ class HicDatasetCreator:
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
-        with open(os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
+        with open(os.path.join(self.hic_root_path, self.genome_str, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
             ret = pickle.load(f)
         return ret
 
     def merge_graphs(self, nx_graph, hic_graph):
-        nx.set_edge_attributes(hic_graph, "hic", "type")
+        # Print node attributes of hic_graph
+        print("\nNode attributes in hic_graph:")
+        for node in sorted(hic_graph.nodes()):
+            print(f"Node {node} attributes: {hic_graph.nodes[node]}")
+        
+        # Print a sample of edge attributes in hic_graph
+        print("\nSample of edge attributes in hic_graph (first 5 edges):")
+        for i, (u, v, data) in enumerate(hic_graph.edges(data=True)):
+            if i >= 5:
+                break
+            print(f"Edge ({u}, {v}) attributes: {data}")
+
         nx.set_edge_attributes(nx_graph, "overlap", "type")
-        return nx.compose(nx.MultiGraph(nx_graph), nx.MultiGraph(hic_graph))
+        # Create a new graph for the result
+        merged_graph = nx.MultiGraph(nx_graph)  # Start with a copy of nx_graph
+        
+        # Add Hi-C edges with the mapping (a,b) -> (a*2, b*2)
+        for u, v, data in hic_graph.edges(data=True):
+            # Map node IDs: multiply by 2
+            u_mapped = u * 2
+            v_mapped = v * 2
+            
+            # Add the edge with type "hic"
+            merged_graph.add_edge(u_mapped, v_mapped, type="hic", **data)
+        
+        print(f"\nTotal nodes in merged graph: {len(merged_graph.nodes())}")
+        print(f"Total edges in merged graph: {len(merged_graph.edges())}")
+        return merged_graph
 
     def parse_gfa(self):
         nx_graph, read_seqs, unitig_2_node, utg_2_reads, single_read_haplotypes = self.only_from_gfa()
@@ -1194,6 +1219,21 @@ class HicDatasetCreator:
             initial_edge_types[edge_type] = initial_edge_types.get(edge_type, 0) + 1
         print(f"Initial edge type distribution: {initial_edge_types}")
 
+        # First, ensure all reverse complement edges are present
+        # For each edge (u,v), add the reverse complement edge (v^rc, u^rc)
+        edges_to_add = []
+        for u, v, key, data in nx_graph.edges(data=True, keys=True):
+            # Calculate reverse complement node IDs
+            u_rc = u + 1 if u % 2 == 0 else u - 1
+            v_rc = v + 1 if v % 2 == 0 else v - 1
+            
+            # Add reverse complement edge (v_rc, u_rc) with same attributes
+            edges_to_add.append((v_rc, u_rc, data))
+        
+        # Add the reverse complement edges to the graph
+        for u_rc, v_rc, data in edges_to_add:
+            nx_graph.add_edge(u_rc, v_rc, **data)
+        
         # Create new directed multigraph for single-stranded version
         single_stranded = nx.MultiGraph()
         
@@ -1391,7 +1431,7 @@ class HicDatasetCreator:
         pyg_data.x[:, self.node_attrs.index('hic_degree')] /= 100
         pyg_data.x[:, self.node_attrs.index('read_length')] /= 10000
         pyg_data.x[:, self.node_attrs.index('hic_neighbor_weight')] /= 1000
-        pyg_data.x[:, self.node_attrs.index('support')] /= self.depth
+        #pyg_data.x[:, self.node_attrs.index('support')] /= self.depth
         """self.normalize_ftrs(pyg_data, ['in_degree', 'read_length', 'cov_std', 'read_gc'],
                             method='zscore')
         self.normalize_ftrs(pyg_data, ['cov_avg', 'cov_med'],

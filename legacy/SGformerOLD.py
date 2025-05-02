@@ -7,8 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.utils import degree
 from torch_sparse import SparseTensor, matmul
-from torch_geometric.nn import HeteroConv, GCNConv
-from torch_geometric.data import HeteroData
+
 
 def full_attention_conv(qs, ks, vs, output_attn=False):
     """
@@ -60,7 +59,6 @@ class GraphConvLayer(nn.Module):
 
         self.use_init = use_init
         self.use_weight = use_weight
-        # Adjust input channels to handle concatenated features from previous layer
         if self.use_init:
             in_channels_ = 2 * in_channels
         else:
@@ -70,24 +68,25 @@ class GraphConvLayer(nn.Module):
     def reset_parameters(self):
         self.W.reset_parameters()
 
-    def forward(self, x, edge_index, edge_weight, x0):
+    def forward(self, x, edge_index, x0):
         N = x.shape[0]
         row, col = edge_index
         d = degree(col, N).float()
         d_norm_in = (1.0 / d[col]).sqrt()
         d_norm_out = (1.0 / d[row]).sqrt()
-        # Multiply the normalization with edge weights
-        value = edge_weight * d_norm_in * d_norm_out
+        value = torch.ones_like(row) * d_norm_in * d_norm_out
         value = torch.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)
         adj = SparseTensor(row=col, col=row, value=value, sparse_sizes=(N, N))
         x = matmul(adj, x)  # [N, D]
 
         if self.use_init:
             x = torch.cat([x, x0], 1)
-        if self.use_weight:
+            x = self.W(x)
+        elif self.use_weight:
             x = self.W(x)
 
         return x
+
 
 class GraphConv(nn.Module):
     def __init__(
@@ -110,8 +109,6 @@ class GraphConv(nn.Module):
 
         self.bns = nn.ModuleList()
         self.bns.append(nn.BatchNorm1d(hidden_channels))
-        
-        # All layers process hidden_channels like in original SGformer.py
         for _ in range(num_layers):
             self.convs.append(
                 GraphConvLayer(hidden_channels, hidden_channels, use_weight, use_init)
@@ -132,7 +129,7 @@ class GraphConv(nn.Module):
         for fc in self.fcs:
             fc.reset_parameters()
 
-    def forward(self, x, edge_index, edge_weight):
+    def forward(self, x, edge_index):
         layer_ = []
 
         x = self.fcs[0](x)
@@ -144,7 +141,7 @@ class GraphConv(nn.Module):
         layer_.append(x)
 
         for i, conv in enumerate(self.convs):
-            x = conv(x, edge_index, edge_weight, layer_[0])
+            x = conv(x, edge_index, layer_[0])
             if self.use_bn:
                 x = self.bns[i + 1](x)
             if self.use_act:
@@ -152,7 +149,6 @@ class GraphConv(nn.Module):
             x = F.dropout(x, p=self.dropout, training=self.training)
             if self.use_residual:
                 x = x + layer_[-1]
-            layer_.append(x)
         return x
 
 
@@ -302,7 +298,7 @@ class SGFormer(nn.Module):
         trans_num_layers=1,
         trans_num_heads=1,
         trans_dropout=0.5,
-        gnn_num_layers=1,  # Single parameter for GNN layers
+        gnn_num_layers=1,
         gnn_dropout=0.5,
         gnn_use_weight=True,
         gnn_use_init=False,
@@ -314,9 +310,11 @@ class SGFormer(nn.Module):
         trans_use_residual=True,
         trans_use_weight=True,
         trans_use_act=True,
+        use_graph=True,
+        graph_weight=0.8,
+        aggregate="add",
     ):
         super().__init__()
-
         self.trans_conv = TransConv(
             in_channels,
             hidden_channels,
@@ -329,94 +327,54 @@ class SGFormer(nn.Module):
             trans_use_weight,
             trans_use_act,
         )
-        
-        # Replace separate GNNs with HeteroGCN from PyG
-        self.convs = nn.ModuleList()
-        for _ in range(gnn_num_layers):
-            conv = HeteroConv({
-                ('node', '0', 'node'): GCNConv(hidden_channels, hidden_channels),
-                ('node', '1', 'node'): GCNConv(hidden_channels, hidden_channels),
-            }, aggr='sum')
-            self.convs.append(conv)
-            
-        self.lins = nn.ModuleList()
-        self.lins.append(nn.Linear(in_channels, hidden_channels))
-        for _ in range(gnn_num_layers):
-            self.lins.append(nn.Linear(hidden_channels, hidden_channels))
-            
-        self.bns = nn.ModuleList()
-        for _ in range(gnn_num_layers + 1):
-            self.bns.append(nn.BatchNorm1d(hidden_channels))
-        
-        self.gnn_dropout = gnn_dropout
-        self.gnn_use_bn = gnn_use_bn
-        self.gnn_use_residual = gnn_use_residual
-        self.gnn_use_act = gnn_use_act
-
-        # Final layer for classification/regression tasks
-        self.fc = nn.Sequential(
-            nn.Linear(2 * hidden_channels, out_channels),
-            nn.Tanh()
+        self.graph_conv = GraphConv(
+            in_channels,
+            hidden_channels,
+            gnn_num_layers,
+            gnn_dropout,
+            gnn_use_bn,
+            gnn_use_residual,
+            gnn_use_weight,
+            gnn_use_init,
+            gnn_use_act,
         )
+        self.use_graph = use_graph
+        self.graph_weight = graph_weight
 
-    def forward(self, data):
-        x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
-        
-        # Get transformer embeddings
-        x_trans = self.trans_conv(x, edge_type)
+        self.aggregate = aggregate
 
-        # Create a HeteroData object
-        hetero_data = HeteroData()
-        hetero_data['node'].x = self.lins[0](x)
-        if self.gnn_use_bn:
-            hetero_data['node'].x = self.bns[0](hetero_data['node'].x)
-        hetero_data['node'].x = F.relu(hetero_data['node'].x)
-        hetero_data['node'].x = F.dropout(hetero_data['node'].x, p=self.gnn_dropout, training=self.training)
-        
-        # Add edges by type
-        for edge_type_val in [0, 1]:
-            mask = edge_type == edge_type_val
-            hetero_data[('node', str(edge_type_val), 'node')].edge_index = edge_index[:, mask]
-            hetero_data[('node', str(edge_type_val), 'node')].edge_attr = edge_weight[mask].unsqueeze(1)
-        
-        # Apply heterogeneous GNN layers
-        x_dict = {'node': hetero_data['node'].x}
-        for i, conv in enumerate(self.convs):
-            x_dict_new = conv(x_dict, hetero_data.edge_index_dict, hetero_data.edge_attr_dict)
-            if self.gnn_use_residual:
-                x_dict_new['node'] = x_dict_new['node'] + x_dict['node']
-            
-            x_dict_new['node'] = self.lins[i+1](x_dict_new['node'])
-            if self.gnn_use_bn:
-                x_dict_new['node'] = self.bns[i+1](x_dict_new['node'])
-            if self.gnn_use_act:
-                x_dict_new['node'] = F.relu(x_dict_new['node'])
-            x_dict_new['node'] = F.dropout(x_dict_new['node'], p=self.gnn_dropout, training=self.training)
-            
-            x_dict = x_dict_new
-        
-        # Extract node features - single GNN embedding
-        x_graph = x_dict['node']
-        
-        # Concatenate transformer and GNN embeddings
-        combined_embedding = torch.cat([x_trans, x_graph], dim=1)
-        
-        x = self.fc(combined_embedding)
-        
+        if aggregate == "add":
+            self.fc = nn.Linear(hidden_channels, out_channels)
+        elif aggregate == "cat":
+            self.fc = nn.Linear(2 * hidden_channels, out_channels)
+        else:
+            raise ValueError(f"Invalid aggregate type:{aggregate}")
+
+        self.params1 = list(self.trans_conv.parameters())
+        self.params2 = (
+            list(self.graph_conv.parameters()) if self.graph_conv is not None else []
+        )
+        self.params2.extend(list(self.fc.parameters()))
+
+    def forward(self, x, edge_index):
+        x1 = self.trans_conv(x)
+        if self.use_graph:
+            x2 = self.graph_conv(x, edge_index)
+            if self.aggregate == "add":
+                x = self.graph_weight * x2 + (1 - self.graph_weight) * x1
+            else:
+                x = torch.cat((x1, x2), dim=1)
+        else:
+            x = x1
+        x = self.fc(x)
         return x
+
+    def get_attentions(self, x):
+        attns = self.trans_conv.get_attentions(x)  # [layer num, N, N]
+
+        return attns
 
     def reset_parameters(self):
         self.trans_conv.reset_parameters()
-        for conv in self.convs:
-            for conv_layer in conv.convs.values():
-                conv_layer.reset_parameters()
-        for lin in self.lins:
-            lin.reset_parameters()
-        for bn in self.bns:
-            bn.reset_parameters()
-    
-        # Reset projection head
-        for layer in self.projection:
-            if hasattr(layer, 'reset_parameters'):
-                layer.reset_parameters()
-
+        if self.use_graph:
+            self.graph_conv.reset_parameters()

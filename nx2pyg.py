@@ -154,7 +154,7 @@ def save_to_pyg(nx_graph, output_file, depth):
     edge_type = torch.tensor(edge_types, dtype=torch.long)
     edge_weight = torch.tensor(edge_weights, dtype=torch.float)
     
-    # Z-score normalize edge weights separately for each type
+    """# Z-score normalize edge weights separately for each type
     for type_idx in range(len(edge_type_map)):
         
         # Create mask for current edge type
@@ -176,7 +176,7 @@ def save_to_pyg(nx_graph, output_file, depth):
             
         print(f"\nEdge weight statistics after normalization for type {list(edge_type_map.keys())[type_idx]}:")
         print(f"Mean: {torch.mean(edge_weight[type_mask])}")
-        print(f"Std:  {torch.std(edge_weight[type_mask])}")
+        print(f"Std:  {torch.std(edge_weight[type_mask])}")"""
     
     # Now compute degrees after edge_index is created
     overlap_degrees = degree(edge_index[0][edge_type == 0], num_nodes=num_nodes)  # For overlap edges
@@ -268,7 +268,7 @@ def save_to_pyg(nx_graph, output_file, depth):
 
 def normalize_edge_weights(g, edge_type=1, device=None):
     """
-    Normalize edge weights of a specific edge type to [0,1] range.
+    Normalize edge weights of a specific edge type by dividing by 10000.
     
     Args:
         g: Graph object
@@ -283,16 +283,11 @@ def normalize_edge_weights(g, edge_type=1, device=None):
     edge_mask = g.edge_type == edge_type
     edge_weights = g.edge_weight[edge_mask]
     
-    # Normalize edge weights to [0,1] range
+    # Simply divide the edge weights by 10000
     if len(edge_weights) > 0:  # Only normalize if we have edges of the specified type
-        min_weight = edge_weights.min()
-        max_weight = edge_weights.max()
-        if max_weight > min_weight:  # Avoid division by zero
-            normalized_weights = (edge_weights - min_weight) / (max_weight - min_weight)
-            g.edge_weight[edge_mask] = normalized_weights.to(device)
-            print(f"Normalized edge weights range: [{normalized_weights.min():.4f}, {normalized_weights.max():.4f}]")
-        else:
-            print("All edge weights are equal, no normalization needed")
+        # Divide by 10000
+        g.edge_weight[edge_mask] = edge_weights / 10000
+        print(f"Divided edge weights by 10000. New range: [{g.edge_weight[edge_mask].min():.4f}, {g.edge_weight[edge_mask].max():.4f}]")
     else:
         print(f"No edges of type {edge_type} found")
     
@@ -317,6 +312,215 @@ def nx_to_pyg(nx_graph, output_file, depth):
     
     return new_to_old
 
+def analyze_hic(nx_graph):
+    """
+    Analyze Hi-C edges within and between chromosomes.
+    
+    Args:
+        nx_graph: NetworkX graph with 'read_chr' node attribute
+        
+    Returns:
+        tuple: (within_chrom_counts, cross_chrom_counts)
+            - within_chrom_counts: Dictionary mapping chromosome to count of Hi-C edges within that chromosome
+            - cross_chrom_counts: Dictionary mapping chromosome pairs to count of Hi-C edges between them
+    """
+    # Check if graph has chromosome information
+    if 'read_chr' not in nx_graph.nodes[list(nx_graph.nodes())[0]]:
+        print("Error: Graph nodes do not have 'read_chr' attribute")
+        return {}, {}
+    
+    # Get chromosome for each node
+    node_to_chrom = {}
+    chroms = set()
+    for node in nx_graph.nodes():
+        chrom = nx_graph.nodes[node]['read_chr']
+        node_to_chrom[node] = chrom
+        chroms.add(chrom)
+    
+    # Initialize counters
+    within_chrom_counts = {chrom: 0 for chrom in chroms}
+    cross_chrom_counts = {}
+    
+    # Count Hi-C edges
+    total_hic_edges = 0
+    for u, v, key, data in nx_graph.edges(data=True, keys=True):
+        edge_type = data.get('type')
+        # Ensure edge_type is a string
+        if isinstance(edge_type, list):
+            edge_type = edge_type[0]
+            
+        if edge_type == 'hic':
+            total_hic_edges += 1
+            chrom_u = node_to_chrom[u]
+            chrom_v = node_to_chrom[v]
+            
+            if chrom_u == chrom_v:
+                # Within-chromosome edge
+                within_chrom_counts[chrom_u] += 1
+            else:
+                # Cross-chromosome edge
+                # Sort chromosomes to ensure consistent counting
+                chrom_pair = tuple(sorted([chrom_u, chrom_v]))
+                if chrom_pair not in cross_chrom_counts:
+                    cross_chrom_counts[chrom_pair] = 0
+                cross_chrom_counts[chrom_pair] += 1
+    
+    # Print summary
+    print(f"\nHi-C Edge Analysis:")
+    print(f"Total Hi-C edges: {total_hic_edges}")
+    
+    print("\nWithin-chromosome Hi-C edges:")
+    within_total = sum(within_chrom_counts.values())
+    for chrom, count in sorted(within_chrom_counts.items()):
+        print(f"  {chrom}: {count} edges")
+    print(f"Total within-chromosome: {within_total} ({within_total/total_hic_edges*100:.1f}%)")
+    
+    print("\nCross-chromosome Hi-C edges:")
+    cross_total = sum(cross_chrom_counts.values())
+    for chrom_pair, count in sorted(cross_chrom_counts.items(), key=lambda x: (-x[1], x[0])):
+        print(f"  {chrom_pair[0]} ↔ {chrom_pair[1]}: {count} edges")
+    print(f"Total cross-chromosome: {cross_total} ({cross_total/total_hic_edges*100:.1f}%)")
+    
+    return within_chrom_counts, cross_chrom_counts
+
+def check_bitwise_xor_nodes(nx_graph):
+    """
+    Check if for each node n in the graph, node n^1 (bitwise XOR) exists.
+    Also compares the degrees of node pairs.
+    
+    Args:
+        nx_graph: NetworkX graph
+        
+    Returns:
+        dict: Statistics about node pairs
+    """
+    nodes = list(nx_graph.nodes())
+    total_nodes = len(nodes)
+    
+    # Count nodes with and without XOR pairs
+    has_xor_pair = 0
+    missing_xor_pair = 0
+    xor_pairs = {}
+    
+    # Degree comparison statistics
+    same_degree = 0
+    different_degree = 0
+    degree_differences = []
+    
+    for node in nodes:
+        xor_node = node ^ 1  # Bitwise XOR with 1
+        if xor_node in nx_graph:
+            has_xor_pair += 1
+            xor_pairs[node] = xor_node
+            
+            # Compare degrees
+            node_degree = nx_graph.degree(node)
+            xor_node_degree = nx_graph.degree(xor_node)
+            
+            if node_degree == xor_node_degree:
+                same_degree += 1
+            else:
+                different_degree += 1
+                degree_differences.append(abs(node_degree - xor_node_degree))
+        else:
+            missing_xor_pair += 1
+    
+    # Calculate statistics
+    stats = {
+        'total_nodes': total_nodes,
+        'nodes_with_xor_pair': has_xor_pair,
+        'nodes_missing_xor_pair': missing_xor_pair,
+        'percentage_with_pair': (has_xor_pair / total_nodes) * 100 if total_nodes > 0 else 0,
+        'same_degree_pairs': same_degree,
+        'different_degree_pairs': different_degree
+    }
+    
+    # Calculate average degree difference if there are any differences
+    if degree_differences:
+        stats['avg_degree_difference'] = sum(degree_differences) / len(degree_differences)
+        stats['max_degree_difference'] = max(degree_differences)
+    
+    # Print summary
+    print(f"\nBitwise XOR Node Analysis:")
+    print(f"Total nodes: {total_nodes}")
+    print(f"Nodes with XOR pair (n^1): {has_xor_pair} ({stats['percentage_with_pair']:.1f}%)")
+    print(f"Nodes missing XOR pair: {missing_xor_pair}")
+    
+    # Print degree comparison
+    if has_xor_pair > 0:
+        print(f"\nDegree Comparison for XOR Pairs:")
+        print(f"Pairs with same degree: {same_degree} ({same_degree/has_xor_pair*100:.1f}%)")
+        print(f"Pairs with different degree: {different_degree} ({different_degree/has_xor_pair*100:.1f}%)")
+        
+        if different_degree > 0:
+            print(f"Average degree difference: {stats['avg_degree_difference']:.2f}")
+            print(f"Maximum degree difference: {stats['max_degree_difference']}")
+    
+    return stats, xor_pairs
+
+def analyze_hic_edge_weights(nx_graph):
+    """
+    Analyze the weight distribution of Hi-C edges in the graph.
+    
+    Args:
+        nx_graph: NetworkX graph with 'type' and 'weight' edge attributes
+        
+    Returns:
+        dict: Statistics about Hi-C edge weights
+    """
+    hic_weights = []
+    
+    # Collect weights of all Hi-C edges
+    for u, v, key, data in nx_graph.edges(data=True, keys=True):
+        edge_type = data.get('type')
+        # Ensure edge_type is a string
+        if isinstance(edge_type, list):
+            edge_type = edge_type[0]
+            
+        if edge_type == 'hic' and 'weight' in data:
+            hic_weights.append(data['weight'])
+    
+    # Calculate statistics
+    if hic_weights:
+        min_weight = min(hic_weights)
+        max_weight = max(hic_weights)
+        avg_weight = sum(hic_weights) / len(hic_weights)
+        
+        print("\nHi-C Edge Weight Statistics:")
+        print(f"Total Hi-C edges with weights: {len(hic_weights)}")
+        print(f"Minimum weight: {min_weight}")
+        print(f"Maximum weight: {max_weight}")
+        print(f"Average weight: {avg_weight:.4f}")
+        
+        # Calculate percentiles
+        hic_weights.sort()
+        p25 = hic_weights[int(len(hic_weights) * 0.25)]
+        p50 = hic_weights[int(len(hic_weights) * 0.5)]
+        p75 = hic_weights[int(len(hic_weights) * 0.75)]
+        p90 = hic_weights[int(len(hic_weights) * 0.9)]
+        p99 = hic_weights[int(len(hic_weights) * 0.99)]
+        
+        print(f"25th percentile: {p25}")
+        print(f"50th percentile (median): {p50}")
+        print(f"75th percentile: {p75}")
+        print(f"90th percentile: {p90}")
+        print(f"99th percentile: {p99}")
+        
+        return {
+            'count': len(hic_weights),
+            'min': min_weight,
+            'max': max_weight,
+            'avg': avg_weight,
+            'p25': p25,
+            'p50': p50,
+            'p75': p75,
+            'p90': p90,
+            'p99': p99
+        }
+    else:
+        print("\nNo Hi-C edges with weights found in the graph")
+        return {'count': 0}
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Convert NetworkX graph to PyTorch Geometric graph')
     parser.add_argument('--input', type=str, required=True, help='Input NetworkX graph file (.pkl)')
@@ -324,6 +528,12 @@ if __name__ == "__main__":
     parser.add_argument('--mapping', type=str, help='Output file for node ID mapping (.pkl)')
     parser.add_argument('--depth', type=int, default=40, 
                         help='Sequencing depth for normalizing support feature')
+    parser.add_argument('--analyze', action='store_true',
+                        help='Analyze Hi-C edges within and between chromosomes')
+    parser.add_argument('--check-xor', action='store_true',
+                        help='Check if for each node n, node n^1 exists')
+    parser.add_argument('--check-weights', action='store_true',
+                        help='Check the weight distribution of Hi-C edges')
     
     args = parser.parse_args()
     
@@ -331,7 +541,31 @@ if __name__ == "__main__":
     import pickle
     with open(args.input, 'rb') as f:
         nx_graph = pickle.load(f)
-    
+
+    # Check bitwise XOR nodes if requested
+    if args.check_xor:
+        check_bitwise_xor_nodes(nx_graph)
+        exit()
+
+    # Check Hi-C edge weights if requested
+    if args.check_weights:
+        analyze_hic_edge_weights(nx_graph)
+        exit()
+
+    # Analyze Hi-C edges if requested
+    if args.analyze:
+        # Get unique node attribute names
+        attr_names = set()
+        for node, attrs in nx_graph.nodes(data=True):
+            attr_names.update(attrs.keys())
+        
+        print("\nNode attributes:")
+        print("Found these node attributes in the graph:")
+        for attr in sorted(attr_names):
+            print(f"  {attr}")
+        analyze_hic(nx_graph)
+        exit()
+
     # Convert to PyG
     nx_to_pyg(nx_graph, args.output, args.depth)
     

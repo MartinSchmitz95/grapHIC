@@ -70,9 +70,9 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         print(f"Created gfa graph {chrN}_{i}")
 
     # run HiC pipeline
-    if gen_step_config['hic']:
+    """if gen_step_config['hic']:
         dataset_object.process_hic()
-        dataset_object.make_hic_edges()
+        dataset_object.make_hic_edges()"""
 
     if gen_step_config['parse_gfa']:
         nx_graph = dataset_object.parse_gfa()
@@ -88,7 +88,7 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         # not sure if logic code in here is the prettiest, but should work
         hic_graph = dataset_object.load_hic_edges()
         print("loaded Hi-C graph")
-        nx_graph = dataset_object.merged_graphs(nx_graph, hic_graph)
+        nx_graph = dataset_object.merge_graphs(nx_graph, hic_graph)
         print("merged Hi-C graph")
         dataset_object.pickle_save(nx_graph, dataset_object.merged_graphs_path)
         print("saved merged Hi-C graph")
