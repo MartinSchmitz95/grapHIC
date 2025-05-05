@@ -117,24 +117,6 @@ def nx_from_gfa(gfa_path, diploid=False):
                 else:
                     print(f"Unknown line type: {line}")
                     exit()
-                # What if they come from different strands but are all merged in a single unitig?
-                # Or even worse, different chromosomes? How do you handle that?
-                # I don't think you can. It's an error in the graph
-                #TODO think about graph splitting heuristics here?
-                strand = 1 if sum(strands) >= 0 else -1
-                start = min(starts)
-                end = max(ends)
-                chromosome = Counter(chromosomes).most_common()[0][0]
-
-                if diploid:
-                    variant = re.findall(r'variant=([P|M])', description)[0]
-                else:
-                    variant = '0'
-                read_strands[real_idx], read_strands[virt_idx] = strand, -strand
-                read_starts[real_idx] = read_starts[virt_idx] = start
-                read_ends[real_idx] = read_ends[virt_idx] = end
-                read_variants[real_idx] = read_variants[virt_idx] = variant
-                read_chrs[real_idx] = read_chrs[virt_idx] = chromosome
 
                 node_idx += 2
 
