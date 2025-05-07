@@ -23,7 +23,7 @@ process GFA_TO_FA {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        awk: \$( awk --version | head -n 1 | sed -e "s/,.*\$//g" )
+        awk: \$( awk -W version | head -n 1 | sed -e "s/,.*\$//g" )
     END_VERSIONS
     """
 }
