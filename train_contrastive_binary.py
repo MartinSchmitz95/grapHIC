@@ -14,11 +14,10 @@ import yaml
 #from YakModel import YakGATModel
 # Disable
 #from torch_geometric.utils import to_undirected
-from SGformer_HGC import SGFormer as SGFormer_HGC
-from SGformer import SGFormer
+from SGformer_HGC import SGFormer
 from torch_geometric.utils import degree
 import torch_sparse
-from cont_losses_binary import SupConLoss
+
 class SwitchLoss(nn.Module):
     def __init__(self, lambda_1=1.0, lambda_2=1.0, lambda_3=1.0):
         super(SwitchLoss, self).__init__()
@@ -420,15 +419,12 @@ def local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type):
     return final_metric
 
 
-def train(model, data_path, train_selection, valid_selection, device, mode, config):
+def train(model, data_path, train_selection, valid_selection, device, config):
     best_valid_loss = 10000
     overfit = not bool(valid_selection)
 
-    if mode == 'pairloss':
-        objective = HammingLoss().to(device)
-        #switch_loss = SwitchLoss().to(device)
-    elif mode == 'subcon':
-        objective = SupConLoss().to(device)
+    hamming_loss = HammingLoss().to(device)
+    switch_loss = SwitchLoss().to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
     #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=config['decay'], patience=config['patience'], verbose=True)
@@ -443,7 +439,7 @@ def train(model, data_path, train_selection, valid_selection, device, mode, conf
             model.train()
             random.shuffle(train_selection)
             train_metrics = train_epoch(model, train_selection, data_path, device, optimizer, 
-                                      objective, config, epoch)
+                                      hamming_loss, switch_loss, config, epoch)
 
             # Validation phase (if applicable)
             valid_metrics = {}
@@ -451,7 +447,7 @@ def train(model, data_path, train_selection, valid_selection, device, mode, conf
                 print('===> VALIDATION')
                 model.eval()
                 valid_metrics = validate_epoch(model, valid_selection, data_path, device,
-                                            objective, config, epoch)
+                                            hamming_loss, switch_loss, config, epoch)
                 #scheduler.step(valid_metrics['valid_loss'])
                 
                 if valid_metrics['valid_loss'] < best_valid_loss:
@@ -472,12 +468,10 @@ def train(model, data_path, train_selection, valid_selection, device, mode, conf
                 print("Saved model")
 
 def train_epoch(model, train_selection, data_path, device, optimizer, 
-                objective, config, epoch):
+                hamming_loss, switch_loss, config, epoch):
     train_loss = []
     pred_mean, pred_std = [], []
     compute_metrics = (epoch % config['compute_metrics_every'] == 0)
-    if mode == 'subcon':
-        compute_metrics = False
     global_phasing_train, local_phasing_train = [], []
 
     for idx, graph_name in enumerate(train_selection):
@@ -488,20 +482,17 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
         #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)    
         g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
 
-        predictions = model(g)
-        if mode == 'pairloss':
-            predictions = predictions.squeeze()
+        predictions = model(g).squeeze()
+        
+        pred_mean.append(predictions.mean().item())
+        pred_std.append(predictions.std().item())
 
-            pred_mean.append(predictions.mean().item())
-            pred_std.append(predictions.std().item())
-
-        loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
-
-        """if config['alpha'] > 0:
+        loss_1 = hamming_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
+        if config['alpha'] > 0:
             loss_2 = switch_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g, g.chr)
             loss = loss_1 + config['alpha'] * loss_2
         else:
-            loss = loss_1"""
+            loss = loss_1
             
         loss.backward()
         optimizer.step()
@@ -527,12 +518,10 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
     return metrics
 
 def validate_epoch(model, valid_selection, data_path, device, 
-                  objective, config, epoch):
+                  hamming_loss, switch_loss, config, epoch):
     valid_loss = []
     valid_pred_mean, valid_pred_std = [], []
     compute_metrics = (epoch % config['compute_metrics_every'] == 0)
-    if mode == 'subcon':
-        compute_metrics = False
     valid_global_phasing, valid_local_phasing = [], []
 
     with torch.no_grad():
@@ -541,18 +530,16 @@ def validate_epoch(model, valid_selection, data_path, device,
             g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
             g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
 
-            predictions = model(g)
-            if mode == 'pairloss':
-                predictions = predictions.squeeze()
-                valid_pred_mean.append(predictions.mean().item())
-                valid_pred_std.append(predictions.std().item())
+            predictions = model(g).squeeze()
+            valid_pred_mean.append(predictions.mean().item())
+            valid_pred_std.append(predictions.std().item())
 
-            loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
-            """if config['alpha'] > 0:
+            loss_1 = hamming_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
+            if config['alpha'] > 0:
                 loss_2 = switch_loss(g.y, predictions, g.edge_index[0], g.edge_index[1], g, g.chr)
                 loss = loss_1 + config['alpha'] * loss_2
             else:
-                loss = loss_1"""
+                loss = loss_1
             valid_loss.append(loss.item())
 
             if compute_metrics:
@@ -586,8 +573,12 @@ if __name__ == '__main__':
     parser.add_argument("--hyper_config", type=str, default='train_config.yml', help="dataset path")
     parser.add_argument('--diploid', action='store_true', default=False, help="Enable evaluation (default: True)")
     parser.add_argument("--wandb", type=str, default='debug', help="dataset path")
+    parser.add_argument('--symmetry', action='store_true', default=False, help="Enable evaluation (default: True)")
+    parser.add_argument('--aux', action='store_true', default=False, help="Enable evaluation (default: True)")
+    parser.add_argument('--bce', action='store_true', default=False, help="Enable evaluation (default: True)")
+    parser.add_argument('--hap_switch', action='store_true', default=False, help="Enable evaluation (default: True)")
+    parser.add_argument('--quick', action='store_true', default=False, help="Enable evaluation (default: True)")
     parser.add_argument("--seed", type=int, default=0, help="dataset path")
-    parser.add_argument("--mode", type=str, default='pairloss', help="dataset path")
 
     args = parser.parse_args()
 
@@ -599,8 +590,11 @@ if __name__ == '__main__':
     device = args.device
     data_config = args.data_config
     diploid = args.diploid
+    symmetry = args.symmetry
+    aux = args.aux
     hyper_config = args.hyper_config
-    mode = args.mode
+    quick = args.quick
+    hap_switch = args.hap_switch
     full_dataset, valid_selection, train_selection = train_utils.create_dataset_dicts(data_config=data_config)
     train_data = train_utils.get_numbered_graphs(train_selection)
     valid_data = train_utils.get_numbered_graphs(valid_selection, starting_counts=train_selection)
@@ -613,20 +607,8 @@ if __name__ == '__main__':
 
     train_utils.set_seed(args.seed)
    
-    if mode == 'pairloss':
-        model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout'], layer_norm=config['layer_norm']).to(device)
-    elif mode == 'subcon':
-        model = SGFormer_HGC(
-            in_channels=config['node_features'],
-            hidden_channels=config['hidden_features'],
-            out_channels= config['emb_dim'],
-            projection_dim=config['projection_dim'],
-            trans_num_layers=config['num_trans_layers'],
-            trans_dropout= 0, #config['dropout'],
-            gnn_num_layers=config['num_gnn_layers'],
-            gnn_dropout= 0, #config['gnn_dropout'],
-            layer_norm=config['layer_norm']
-        ).to(device)
+    model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout'], layer_norm=config['layer_norm']).to(device)
+
     #latest change: half hidden channels, reduce gnn_layers, remove dropout
     to_undirected = False
     model.to(device)
@@ -634,6 +616,6 @@ if __name__ == '__main__':
         model.load_state_dict(torch.load(load_checkpoint, map_location=device))
         print(f"Loaded model from {load_checkpoint}")
 
-    train(model, data_path, train_data, valid_data, device, mode, config)
+    train(model, data_path, train_data, valid_data, device, config)
 
     #python train_yak2.py --save_model_path /mnt/sod2-project/csb4/wgs/martin/rl_dgl_datasets/trained_models/ --data_path /mnt/sod2-project/csb4/wgs/martin/diploid_datasets/diploid_dataset_hg002_cent/pyg_graphs/ --data_config dataset_diploid_cent.yml --hyper_config config_yak.yml --wandb pred_yak --run_name yak2_SGformer_base --device cuda:4 --diploid

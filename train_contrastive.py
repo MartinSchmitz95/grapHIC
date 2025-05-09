@@ -14,7 +14,7 @@ import yaml
 #from torch_geometric.utils import to_undirected
 import torch_geometric.transforms as T
 from SGformer_HGC import SGFormer, debug_model
-from contrastive_loss import MultiLabelConLoss, ConLoss, SupervisedContrastiveLoss, MultiDimHammingLoss, adaptive_clustering_loss, multi_adaptive_clustering_loss
+from contrastive_loss import MultiLabelConLoss, SupConLoss, SupervisedContrastiveLoss, MultiDimHammingLoss, adaptive_clustering_loss, multi_adaptive_clustering_loss
 import copy
 from ClusterGCN import ClusterGCN
 
@@ -234,7 +234,7 @@ def train_epoch(model, train_selection, data_path, device, optimizer,
     for idx, graph_name in enumerate(train_selection):
         print(f"Training graph {graph_name}, id: {idx} of {len(train_selection)}")
         g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
-
+        g, _ = preprocess_graph(g, device)
         g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
         #g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
 
@@ -292,7 +292,7 @@ def validate_epoch(model, valid_selection, data_path, device,
         for idx, graph_name in enumerate(valid_selection):
             print(f"Validating graph {graph_name}, id: {idx+1} of {len(valid_selection)}")
             g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
-            
+            g, _ = preprocess_graph(g, device)
             g.x = torch.abs(g.y).float().unsqueeze(1).to(device)
             
             # Get embeddings for all nodes
@@ -375,10 +375,10 @@ def evaluate_embeddings(model, data_path, eval_selection, device):
             g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
             
             # Normalize edge weights
-            """g = normalize_edge_weights(g, edge_type=1, device=device)
+            #g = normalize_edge_weights(g, edge_type=1, device=device)
             
             # Preprocess graph
-            g, _ = preprocess_graph(g, device)"""
+            g, _ = preprocess_graph(g, device)
             g.x = torch.abs(g.y).float().unsqueeze(1).to(device) #torch.cat([torch.abs(g.y).float(), torch.abs(g.y).float()], dim=1)
             # g.x = torch.cat([g.x.to(device), g.pe_0.to(device), g.pe_1.to(device)], dim=1)
 
@@ -572,8 +572,9 @@ if __name__ == '__main__':
         projection_dim=config['projection_dim'],
         trans_num_layers=config['num_trans_layers'],
         trans_dropout= 0, #config['dropout'],
-        gnn_num_layers=config['num_gnn_layers_overlap'],
+        gnn_num_layers=config['num_gnn_layers'],
         gnn_dropout= 0, #config['gnn_dropout'],
+        layer_norm=config['layer_norm']
     ).to(device)
     
     """model = debug_model(
@@ -582,7 +583,7 @@ if __name__ == '__main__':
         out_channels= config['emb_dim'],
         projection_dim=config['projection_dim'],
     ).to(device)"""
-
+    
     #model = ClusterGCN(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=config['emb_dim'], num_layers=config['num_gnn_layers_overlap'], dropout=config['gnn_dropout']).to(device)
     to_undirected = False
     model.to(device)

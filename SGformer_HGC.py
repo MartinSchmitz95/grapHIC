@@ -315,6 +315,7 @@ class SGFormer(nn.Module):
         trans_use_weight=True,
         trans_use_act=True,
         projection_dim=128,  # Dimension for contrastive learning projection
+        layer_norm=False,  # New parameter to toggle between BatchNorm and LayerNorm
     ):
         super().__init__()
         
@@ -349,12 +350,16 @@ class SGFormer(nn.Module):
             
         self.bns = nn.ModuleList()
         for _ in range(gnn_num_layers + 1):
-            self.bns.append(nn.BatchNorm1d(hidden_channels))
+            if layer_norm:
+                self.bns.append(nn.LayerNorm(hidden_channels))
+            else:
+                self.bns.append(nn.BatchNorm1d(hidden_channels))
         
         self.gnn_dropout = gnn_dropout
         self.gnn_use_bn = gnn_use_bn
         self.gnn_use_residual = gnn_use_residual
         self.gnn_use_act = gnn_use_act
+        self.layer_norm = layer_norm
 
         # Final layer for classification/regression tasks
         self.fc = nn.Sequential(

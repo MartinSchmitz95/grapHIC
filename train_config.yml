@@ -1,8 +1,7 @@
 training:
   seed: 1
   num_epochs: 10000
-  num_gnn_layers_overlap: 8
-  num_gnn_layers_hic: 8
+  num_gnn_layers: 8
   num_trans_layers: 3
   hidden_features: 512
   emb_dim: 128
@@ -22,3 +21,4 @@ training:
   batch_size: 4096
   evaluate: True
   visualize: False
+  layer_norm: True  

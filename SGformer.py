@@ -339,6 +339,7 @@ class SGFormer(nn.Module):
         trans_use_weight=True,
         trans_use_act=True,
         use_standard_attention=False,  # New parameter for attention type
+        layer_norm=False,  # New flag to use LayerNorm instead of BatchNorm
     ):
         super().__init__()
 
@@ -372,12 +373,16 @@ class SGFormer(nn.Module):
             
         self.bns = nn.ModuleList()
         for _ in range(gnn_num_layers + 1):
-            self.bns.append(nn.BatchNorm1d(hidden_channels))
+            if layer_norm:
+                self.bns.append(nn.LayerNorm(hidden_channels))
+            else:
+                self.bns.append(nn.BatchNorm1d(hidden_channels))
         
         self.gnn_dropout = gnn_dropout
         self.gnn_use_bn = gnn_use_bn
         self.gnn_use_residual = gnn_use_residual
         self.gnn_use_act = gnn_use_act
+        self.layer_norm = layer_norm
 
         # Final layer for classification/regression tasks
         self.fc = nn.Sequential(
@@ -403,18 +408,31 @@ class SGFormer(nn.Module):
         for edge_type_val in [0, 1]:
             mask = edge_type == edge_type_val
             hetero_data[('node', str(edge_type_val), 'node')].edge_index = edge_index[:, mask]
-            hetero_data[('node', str(edge_type_val), 'node')].edge_attr = edge_weight[mask].unsqueeze(1)
+            # Make sure edge_weight is properly handled for GCNConv
+            if edge_weight is not None:
+                hetero_data[('node', str(edge_type_val), 'node')].edge_attr = edge_weight[mask].unsqueeze(1)
         
         # Apply heterogeneous GNN layers
         x_dict = {'node': hetero_data['node'].x}
         for i, conv in enumerate(self.convs):
-            x_dict_new = conv(x_dict, hetero_data.edge_index_dict, hetero_data.edge_attr_dict)
-            if self.gnn_use_residual:
-                x_dict_new['node'] = x_dict_new['node'] + x_dict['node']
+            # Store previous features for residual connection
+            prev_features = x_dict['node']
             
+            # Apply heterogeneous convolution
+            x_dict_new = conv(x_dict, hetero_data.edge_index_dict, hetero_data.edge_attr_dict)
+            
+            # Apply linear transformation
             x_dict_new['node'] = self.lins[i+1](x_dict_new['node'])
+            
+            # Apply residual connection before normalization
+            if self.gnn_use_residual:
+                x_dict_new['node'] = x_dict_new['node'] + prev_features
+            
+            # Apply batch normalization or layer normalization
             if self.gnn_use_bn:
                 x_dict_new['node'] = self.bns[i+1](x_dict_new['node'])
+            
+            # Apply activation and dropout
             if self.gnn_use_act:
                 x_dict_new['node'] = F.relu(x_dict_new['node'])
             x_dict_new['node'] = F.dropout(x_dict_new['node'], p=self.gnn_dropout, training=self.training)
@@ -440,9 +458,9 @@ class SGFormer(nn.Module):
             lin.reset_parameters()
         for bn in self.bns:
             bn.reset_parameters()
-    
-        # Reset projection head
-        for layer in self.projection:
+        
+        # Reset final layer
+        for layer in self.fc:
             if hasattr(layer, 'reset_parameters'):
                 layer.reset_parameters()
 

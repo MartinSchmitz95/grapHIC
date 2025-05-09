@@ -118,6 +118,7 @@ class Omega: # code from: https://github.com/isaranto/omega_index/blob/master/om
         
 
 def fuzzy_clustering_metrics(true_communities, pred_communities):
+
     """
     Compute metrics for fuzzy/overlapping clustering, including Omega Index.
     
@@ -168,5 +169,6 @@ if __name__ == "__main__":
         "cluster4": [9]                # Partial match with com4
     }
     
+
     fuzzy_metrics = fuzzy_clustering_metrics(true_communities, pred_communities)
     print(f"Omega Index: {fuzzy_metrics['omega_index']:.3f}" if fuzzy_metrics['omega_index'] is not None else "Omega Index: Not available")

@@ -207,116 +207,92 @@ class MultiLabelConLoss(nn.Module):
 
         return supervised_contrastive_loss"""
 
-class SupervisedContrastiveLoss(nn.Module):
-    def __init__(self, device, temperature=0.07):
-        """
-        Implementation of the loss described in the paper Supervised Contrastive Learning :
-        https://arxiv.org/abs/2004.11362
 
-        :param temperature: int
-        """
-        super(SupervisedContrastiveLoss, self).__init__()
+class SupConLoss(nn.Module):
+    """Supervised Contrastive Learning for node embeddings"""
+    def __init__(self, temperature=0.07, contrast_mode='all',
+                 base_temperature=0.07):
+        super(SupConLoss, self).__init__()
         self.temperature = temperature
-        self.device = device
-    def forward(self, projections, targets):
-        """
-        :param projections: torch.Tensor, shape [batch_size, projection_dim]
-        :param targets: torch.Tensor, shape [batch_size]
-        :return: torch.Tensor, scalar
-        """
-        
-        # Original implementation for smaller batch sizes
-        dot_product_tempered = torch.mm(projections, projections.T) / self.temperature
-        # Minus max for numerical stability with exponential. Same done in cross entropy. Epsilon added to avoid log(0)
-        exp_dot_tempered = (
-            torch.exp(dot_product_tempered - torch.max(dot_product_tempered, dim=1, keepdim=True)[0]) + 1e-5
-        )
+        self.contrast_mode = contrast_mode
+        self.base_temperature = base_temperature
 
-        mask_similar_class = (targets.unsqueeze(1).repeat(1, targets.shape[0]) == targets).to(device)
-        mask_anchor_out = (1 - torch.eye(exp_dot_tempered.shape[0])).to(device)
-        mask_combined = mask_similar_class * mask_anchor_out
-        cardinality_per_samples = torch.sum(mask_combined, dim=1)
-
-        log_prob = -torch.log(exp_dot_tempered / (torch.sum(exp_dot_tempered * mask_anchor_out, dim=1, keepdim=True)))
-        supervised_contrastive_loss_per_sample = torch.sum(log_prob * mask_combined, dim=1) / cardinality_per_samples
-        supervised_contrastive_loss = torch.mean(supervised_contrastive_loss_per_sample)
-
-        return supervised_contrastive_loss
-    
-    def _memory_efficient_forward(self, projections, targets):
+    def forward(self, features, labels):
+        """Compute supervised contrastive loss for node embeddings.
+        
+        Args:
+            features: Node embeddings of shape [num_nodes, embedding_dim].
+            labels: Node labels of shape [num_nodes].
+        Returns:
+            A loss scalar.
         """
-        Memory-efficient implementation that avoids creating the full N×N matrices
+        device = features.device
+
+        # Verify input dimensions
+        if len(features.shape) != 2:
+            raise ValueError('`features` must be 2D tensor of shape [num_nodes, embedding_dim]')
+            
+        batch_size = features.shape[0]
         
-        :param projections: torch.Tensor, shape [batch_size, projection_dim]
-        :param targets: torch.Tensor, shape [batch_size]
-        :return: torch.Tensor, scalar
-        """        # Ensure targets are on the same device
-        targets = targets.to(self.device)
-        
-        batch_size = projections.shape[0]
-        
-        # Normalize projections for cosine similarity
-        projections = F.normalize(projections, p=2, dim=1)
-        
-        # Process in chunks to avoid OOM
-        chunk_size = min(256, batch_size)
-        loss_sum = 0
-        valid_samples = 0
-        
-        for i in range(0, batch_size, chunk_size):
-            # Get current chunk
-            end_idx = min(i + chunk_size, batch_size)
-            chunk_size_actual = end_idx - i
+        # Verify labels
+        if len(labels.shape) != 1 or labels.shape[0] != batch_size:
+            raise ValueError('`labels` must be 1D tensor of shape [num_nodes]')
             
-            anchor_features = projections[i:end_idx]
-            anchor_labels = targets[i:end_idx]
-            
-            # Compute similarities for this chunk with all projections
-            similarities = torch.matmul(anchor_features, projections.T) / self.temperature
-            
-            # Create mask for samples with the same class
-            mask_similar_class = (anchor_labels.unsqueeze(1) == targets.unsqueeze(0)).to(device)
-            
-            # Create mask to exclude self-comparisons
-            mask_self = torch.zeros(chunk_size_actual, batch_size, device=device)
-            for j in range(chunk_size_actual):
-                mask_self[j, i+j] = 1
-            
-            mask_anchor_out = 1 - mask_self
-            mask_combined = mask_similar_class * mask_anchor_out
-            
-            # Count positives per sample
-            cardinality_per_samples = torch.sum(mask_combined, dim=1)
-            
-            # Skip samples with no positives
-            valid_sample_mask = cardinality_per_samples > 0
-            if not torch.any(valid_sample_mask):
-                continue
-                
-            # Compute exp similarities with numerical stability
-            similarities_max, _ = torch.max(similarities, dim=1, keepdim=True)
-            exp_similarities = torch.exp(similarities - similarities_max)
-            
-            # Compute denominator (sum over all except self)
-            exp_similarities_masked = exp_similarities * mask_anchor_out
-            denominator = torch.sum(exp_similarities_masked, dim=1, keepdim=True)
-            
-            # Compute log probabilities
-            log_probs = torch.log(exp_similarities / denominator + 1e-5)
-            
-            # Compute loss for valid samples
-            loss_per_sample = -torch.sum(mask_combined * log_probs, dim=1) / cardinality_per_samples.clamp(min=1.0)
-            
-            # Add to total loss
-            loss_sum += torch.sum(loss_per_sample[valid_sample_mask])
-            valid_samples += torch.sum(valid_sample_mask)
-        
-        # Return average loss
-        if valid_samples > 0:
-            return loss_sum / valid_samples
+        # Create mask based on labels
+        labels = labels.contiguous().view(-1, 1)
+        mask = torch.eq(labels, labels.T).float().to(device)
+
+        # For contrast_mode 'one', we use only the first half of nodes as anchors
+        # For contrast_mode 'all', all nodes are used as anchors
+        if self.contrast_mode == 'one':
+            # Use first half of batch as anchors
+            anchor_count = batch_size // 2
+            anchor_feature = features[:anchor_count]
+            contrast_feature = features
+            # Adjust mask for the reduced anchor set
+            anchor_mask = mask[:anchor_count]
+        elif self.contrast_mode == 'all':
+            anchor_count = batch_size
+            anchor_feature = features
+            contrast_feature = features
+            anchor_mask = mask
         else:
-            return torch.tensor(0.0, device=device, requires_grad=True)
-    
+            raise ValueError('Unknown mode: {}'.format(self.contrast_mode))
+
+        # Compute similarity matrix
+        anchor_dot_contrast = torch.matmul(anchor_feature, contrast_feature.T) / self.temperature
+        
+        # For numerical stability
+        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        logits = anchor_dot_contrast - logits_max.detach()
+
+        # Create mask to exclude self-contrast
+        logits_mask = torch.ones((anchor_count, batch_size), device=device)
+        # For each anchor, mask out its self-contrast if it's also in the contrast set
+        for i in range(min(anchor_count, batch_size)):
+            logits_mask[i, i] = 0
+            
+        # Apply the positive-negative mask
+        mask = anchor_mask * logits_mask
+        
+        # Compute log probabilities
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-8)
+
+        # Handle cases with no positive pairs
+        mask_pos_pairs = mask.sum(1)
+        mask_pos_pairs = torch.where(mask_pos_pairs < 1e-6, 
+                                     torch.ones_like(mask_pos_pairs), 
+                                     mask_pos_pairs)
+        
+        # Compute mean of log-likelihood over positive pairs
+        mean_log_prob_pos = (mask * log_prob).sum(1) / mask_pos_pairs
+        
+        # Calculate loss
+        loss = -(self.temperature / self.base_temperature) * mean_log_prob_pos
+        loss = loss.mean()
+
+        return loss
 
 class MultiDimHammingLoss(nn.Module):
     """
