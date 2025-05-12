@@ -25,13 +25,13 @@ def process_gfa_to_files(gfa_path,
               utg_to_reads_path='./utg_to_reads.dict.pkl',
               nx_graph_path='./utg_graph.nx.pkl'):
 
-    nx_graph, read_seqs, utg_to_node, utg_to_reads = nx_from_gfa(gfa_path)
+    nx_graph, read_seqs, utg_to_node, utg_to_reads = nx_from_gfa(gfa_path, compute_seqs=False)
     # Save data
     pickle_save(utg_to_node, utg_to_node_path)
     pickle_save(utg_to_reads, utg_to_reads_path)
     pickle_save(nx_graph, nx_graph_path)
 
-def nx_from_gfa(gfa_path, diploid=False):
+def nx_from_gfa(gfa_path, diploid=False, compute_seqs=False):
     graph_nx = nx.DiGraph()
     read_to_node, node_to_read, old_read_to_utg = {}, {}, {}
     unitig_2_node = {}
@@ -82,8 +82,9 @@ def nx_from_gfa(gfa_path, diploid=False):
                 graph_nx.add_node(real_idx)  # real node = original sequence
                 graph_nx.add_node(virt_idx)  # virtual node = rev-comp sequence
 
-                read_seqs[real_idx] = sequence
-                read_seqs[virt_idx] = revc(sequence)
+                if compute_seqs:
+                    read_seqs[real_idx] = sequence
+                    read_seqs[virt_idx] = revc(sequence)
 
                 read_lengths[real_idx] = length
                 read_lengths[virt_idx] = length
