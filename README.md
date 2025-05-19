@@ -15,11 +15,11 @@ Given a set of hifi and HiC reads, you can run our pipeline to get the following
 The haplotype predictions then can be used to cluster the reads and seperate haplotypes. If you are working on an assembly tool you can use them to help guiding the further assembly process. If you are interested in just seperating unitigs into haplotypes you can seperate them as we show in eval_main.py.
 
 ## Installation
-
+```
 git clone https://github.com/MartinSchmitz95/grapHIC.git
 cd grapHIC
 pip install -r requirements.txt
-
+```
 ## Data
 
 The dataset for grapHIC is available at this [Google Drive link](https://docs.google.com/document/d/1dgaDoSTPlwgjVafBDe3Mq3NbJqoQy-G7vrdMBa4lrZM/edit?usp=sharing).
