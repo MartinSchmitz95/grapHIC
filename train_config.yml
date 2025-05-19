@@ -10,6 +10,7 @@ training:
   node_features: 1
   gnn_dropout: 0.0
   lr: 0.0001
+  aux_loss_weight: 0.02
   wandb_mode: 'online'
   decay: 0.95
   patience: 2

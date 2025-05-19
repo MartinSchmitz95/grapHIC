@@ -1,0 +1,18 @@
+# Core dependencies
+torch==2.2.2
+numpy>=2.0.2
+scikit-learn==1.6.1
+scikit-fuzzy==0.5.0
+pyyaml==6.0.2
+
+# Graph libraries
+torch-geometric==2.6.1
+torch-scatter==2.1.2
+torch-sparse==0.6.18
+torch-cluster==1.6.3
+torch-spline-conv==1.2.2
+pyg-lib==0.4.0
+networkx==3.2.1
+
+# Utilities
+tqdm>=4.62.0

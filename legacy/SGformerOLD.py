@@ -312,7 +312,7 @@ class SGFormer(nn.Module):
         trans_use_act=True,
         use_graph=True,
         graph_weight=0.8,
-        aggregate="add",
+        aggregate="cat",
     ):
         super().__init__()
         self.trans_conv = TransConv(

@@ -1675,7 +1675,7 @@ class HicDatasetCreator:
                 if not torch.any(type_mask):
                     continue
                 
-                # Get weights for current type
+                """# Get weights for current type
                 type_weights = edge_weight[type_mask]
                 
                 # Compute mean and std for current type
@@ -1684,7 +1684,8 @@ class HicDatasetCreator:
                 
                 # Normalize weights for current type if std is not 0
                 if type_std != 0:
-                    edge_weight[type_mask] = (type_weights - type_mean) / type_std
+                    edge_weight[type_mask] = (type_weights - type_mean) / type_std"""
+                edge_weight[type_mask] = edge_weight[type_mask] / 10000
             
             # Extract ground truth haplotype labels
             gt_hap = [chr_subgraph.nodes[node]['gt_hap'] for node in chr_subgraph.nodes()]

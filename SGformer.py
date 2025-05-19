@@ -393,9 +393,17 @@ class SGFormer(nn.Module):
     def forward(self, data):
         x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
         
+        # Remove edges with type==0
+        """mask = edge_type != 0
+        edge_index = edge_index[:, mask]
+        edge_type = edge_type[mask]
+        if edge_weight is not None:
+            edge_weight = edge_weight[mask]"""
+        edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
+
         # Get transformer embeddings
         x_trans = self.trans_conv(x, edge_type)
-
+        #edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
         # Create a HeteroData object
         hetero_data = HeteroData()
         hetero_data['node'].x = self.lins[0](x)
@@ -405,7 +413,7 @@ class SGFormer(nn.Module):
         hetero_data['node'].x = F.dropout(hetero_data['node'].x, p=self.gnn_dropout, training=self.training)
         
         # Add edges by type
-        for edge_type_val in [0, 1]:
+        for edge_type_val in [0,1]:
             mask = edge_type == edge_type_val
             hetero_data[('node', str(edge_type_val), 'node')].edge_index = edge_index[:, mask]
             # Make sure edge_weight is properly handled for GCNConv
@@ -461,6 +469,134 @@ class SGFormer(nn.Module):
         
         # Reset final layer
         for layer in self.fc:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+
+
+class SGFormerMulti(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels,
+        out_channels,
+        num_blocks=2,  # Number of SGFormer blocks to stack
+        trans_num_layers=1,
+        trans_num_heads=1,
+        trans_dropout=0.5,
+        gnn_num_layers=1,
+        gnn_dropout=0.5,
+        gnn_use_weight=True,
+        gnn_use_init=False,
+        gnn_use_bn=True,
+        gnn_use_residual=True,
+        gnn_use_act=True,
+        alpha=0.5,
+        trans_use_bn=True,
+        trans_use_residual=True,
+        trans_use_weight=True,
+        trans_use_act=True,
+        use_standard_attention=False,
+        layer_norm=False,
+        residual_between_blocks=True,  # Whether to use residual connections between blocks
+    ):
+        super().__init__()
+        
+        self.num_blocks = num_blocks
+        self.residual_between_blocks = residual_between_blocks
+        
+        # Create multiple SGFormer blocks
+        self.blocks = nn.ModuleList()
+        
+        # First block takes original input channels
+        self.blocks.append(
+            SGFormer(
+                in_channels=in_channels,
+                hidden_channels=hidden_channels,
+                out_channels=hidden_channels,  # Intermediate blocks output hidden_channels
+                trans_num_layers=trans_num_layers,
+                trans_num_heads=trans_num_heads,
+                trans_dropout=trans_dropout,
+                gnn_num_layers=gnn_num_layers,
+                gnn_dropout=gnn_dropout,
+                gnn_use_weight=gnn_use_weight,
+                gnn_use_init=gnn_use_init,
+                gnn_use_bn=gnn_use_bn,
+                gnn_use_residual=gnn_use_residual,
+                gnn_use_act=gnn_use_act,
+                alpha=alpha,
+                trans_use_bn=trans_use_bn,
+                trans_use_residual=trans_use_residual,
+                trans_use_weight=trans_use_weight,
+                trans_use_act=trans_use_act,
+                use_standard_attention=use_standard_attention,
+                layer_norm=layer_norm,
+            )
+        )
+        
+        # Subsequent blocks take hidden_channels as input
+        for _ in range(num_blocks - 1):
+            self.blocks.append(
+                SGFormer(
+                    in_channels=hidden_channels,
+                    hidden_channels=hidden_channels,
+                    out_channels=hidden_channels,  # Intermediate blocks output hidden_channels
+                    trans_num_layers=trans_num_layers,
+                    trans_num_heads=trans_num_heads,
+                    trans_dropout=trans_dropout,
+                    gnn_num_layers=gnn_num_layers,
+                    gnn_dropout=gnn_dropout,
+                    gnn_use_weight=gnn_use_weight,
+                    gnn_use_init=gnn_use_init,
+                    gnn_use_bn=gnn_use_bn,
+                    gnn_use_residual=gnn_use_residual,
+                    gnn_use_act=gnn_use_act,
+                    alpha=alpha,
+                    trans_use_bn=trans_use_bn,
+                    trans_use_residual=trans_use_residual,
+                    trans_use_weight=trans_use_weight,
+                    trans_use_act=trans_use_act,
+                    use_standard_attention=use_standard_attention,
+                    layer_norm=layer_norm,
+                )
+            )
+        
+        # Final projection layer to output dimensions
+        self.final_proj = nn.Sequential(
+            nn.Linear(hidden_channels, out_channels),
+            nn.Tanh()
+        )
+        
+    def forward(self, data):
+        x = data.x
+        
+        # Process the first block
+        x_prev = self.blocks[0](data)
+        
+        # Create a new data object for subsequent blocks
+        for i in range(1, self.num_blocks):
+            # Update the data object with new node features
+            new_data = data.clone()
+            new_data.x = x_prev
+            
+            # Process through the current block
+            x_curr = self.blocks[i](new_data)
+            
+            # Apply residual connection between blocks if specified
+            if self.residual_between_blocks:
+                x_prev = x_curr + x_prev
+            else:
+                x_prev = x_curr
+        
+        # Final projection
+        output = self.final_proj(x_prev)
+        
+        return output
+    
+    def reset_parameters(self):
+        for block in self.blocks:
+            block.reset_parameters()
+        
+        for layer in self.final_proj:
             if hasattr(layer, 'reset_parameters'):
                 layer.reset_parameters()
 

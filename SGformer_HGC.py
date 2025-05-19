@@ -375,13 +375,12 @@ class SGFormer(nn.Module):
             nn.Linear(middle_proj_dim, projection_dim)
         )
 
-    def forward(self, data, return_projection=False):
+    def forward(self, data, return_projection=True):
         x, edge_index, edge_type, edge_weight = data.x, data.edge_index, data.edge_type, data.edge_weight
         
         # Get transformer embeddings
         x_trans = self.trans_conv(x, edge_type)
         
-
         # Create a HeteroData object
         hetero_data = HeteroData()
         hetero_data['node'].x = self.lins[0](x)
@@ -420,7 +419,7 @@ class SGFormer(nn.Module):
         
         # For standard tasks (classification/regression)
         output = self.fc(combined_embedding)
-        #projection = F.normalize(projection, p=2, dim=1)
+        output = F.normalize(output, p=2, dim=1)
 
         # For contrastive learning
         if return_projection:

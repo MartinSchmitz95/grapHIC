@@ -25,5 +25,6 @@ gen_steps:
   ml_graphs: False
 
 training:
-  i002c_v04.multi_21: 1
+  chr1: 1 #i002c_v04_multi_21.chr1
+  chr2: 1 #i002c_v04_multi_21.chr2
 validation:

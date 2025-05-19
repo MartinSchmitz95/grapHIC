@@ -206,7 +206,10 @@ def save_to_pyg(nx_graph, output_file, depth):
     if 'gt_hap' in nx_graph.nodes[0]:
         gt_hap = [nx_graph.nodes[node]['gt_hap'] for node in range(num_nodes)]
         gt_tensor = torch.tensor(gt_hap, dtype=torch.long)
+        print(f"Ground truth haplotype labels found for {len(gt_hap)} nodes")
     else:
+        print("No ground truth haplotype labels found")
+        exit()
         gt_tensor = None
     
     # Extract chromosome numbers if available
@@ -259,8 +262,12 @@ def save_to_pyg(nx_graph, output_file, depth):
     if 'support' in node_attrs:
         # Since we don't have depth parameter, use a default value or calculate from graph  # Default to 30 if not specified
         pyg_data.x[:, node_attrs.index('support')] /= depth
+    #pyg_data.y = gt_tensor
+    #pyg_data.chr = chr_tensor
 
-    pyg_data = normalize_edge_weights(pyg_data, edge_type=1)
+    #pyg_data = normalize_edge_weights(pyg_data, edge_type=1)
+    pyg_data = gating_edge_weights(pyg_data, edge_type=1)
+
     # Save PyG graph
     torch.save(pyg_data, output_file)
     print(f"Saved PyG graph with {num_nodes} nodes and {len(edge_list)} edges to {output_file}")
@@ -290,6 +297,65 @@ def normalize_edge_weights(g, edge_type=1, device=None):
         print(f"Divided edge weights by 10000. New range: [{g.edge_weight[edge_mask].min():.4f}, {g.edge_weight[edge_mask].max():.4f}]")
     else:
         print(f"No edges of type {edge_type} found")
+    
+    return g
+
+def gating_edge_weights(g, edge_type=1):
+    """
+    Normalize edge weights by dividing each edge weight by the sum of all edge weights 
+    connected to its source and target nodes, then averaging these two values.
+    
+    Args:
+        g: PyG graph object
+        edge_type: Type of edges to normalize (default: 1 for Hi-C edges)
+        
+    Returns:
+        Graph with normalized edge weights
+    """
+    # Get edge indices and weights for specified edge type
+    edge_mask = g.edge_type == edge_type
+    if not torch.any(edge_mask):
+        print(f"No edges of type {edge_type} found")
+        return g
+    
+    edge_indices = g.edge_index[:, edge_mask]
+    edge_weights = g.edge_weight[edge_mask]
+    
+    # Calculate sum of edge weights for each node
+    node_weight_sums = torch.zeros(g.num_nodes, dtype=torch.float)
+    
+    # For each edge, add its weight to both source and target nodes' sums
+    for i in range(edge_indices.size(1)):
+        src, dst = edge_indices[0, i], edge_indices[1, i]
+        weight = edge_weights[i]
+        node_weight_sums[src] += weight
+        node_weight_sums[dst] += weight
+    
+    # Avoid division by zero
+    node_weight_sums = torch.clamp(node_weight_sums, min=1e-10)
+    
+    # Normalize each edge weight by the sum of weights for its source and target nodes
+    new_edge_weights = torch.zeros_like(edge_weights)
+    for i in range(edge_indices.size(1)):
+        src, dst = edge_indices[0, i], edge_indices[1, i]
+        weight = edge_weights[i]
+        
+        # Normalize by source and target node weight sums
+        src_norm = weight / node_weight_sums[src]
+        dst_norm = weight / node_weight_sums[dst]
+        
+        # Average the two normalized weights
+        new_edge_weights[i] = (src_norm + dst_norm) / 2.0
+    
+    # Update the edge weights in the graph
+    g.edge_weight[edge_mask] = new_edge_weights
+    
+    # Print statistics
+    print(f"\nEdge weight statistics after gating normalization for type {edge_type}:")
+    print(f"Min: {new_edge_weights.min().item():.6f}")
+    print(f"Max: {new_edge_weights.max().item():.6f}")
+    print(f"Mean: {new_edge_weights.mean().item():.6f}")
+    print(f"Std: {new_edge_weights.std().item():.6f}")
     
     return g
 
