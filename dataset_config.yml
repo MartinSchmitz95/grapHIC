@@ -60,10 +60,11 @@ nextflow: |
 
   process {
       resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
+      time = 5.d
   }
   process {
       withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
-          cpus = 32
+          cpus = 20
           memory = 256.GB
           time = 5.d
       }

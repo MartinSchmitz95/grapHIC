@@ -76,4 +76,3 @@ grapHIC uses a graph transformer architecture (SGFormer) that can efficiently pr
 - Transformer layers for capturing global context
 - Graph neural network layers for local message passing
 - Support for heterogeneous edge types (overlap and Hi-C connections)
-

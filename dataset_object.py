@@ -51,7 +51,7 @@ class HicDatasetCreator:
         self.raft = gen_config['raft']
 
         self.root_path = dataset_path
-        self.tmp_path = os.path.join(dataset_path, 'tmp')
+        self.tmp_path = os.path.join(dataset_path, 'tmp_hg2')
         self.full_reads_path = os.path.join(dataset_path, "full_reads")
         self.read_descr_path = os.path.join(dataset_path, "read_descr")
         self.gfa_unitig_path = os.path.join(dataset_path, "gfa_unitig")
@@ -350,7 +350,7 @@ class HicDatasetCreator:
                          "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
-        #subprocess.run(call, shell=True, check=False, cwd=self.root_path)
+        subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
         """
@@ -399,12 +399,13 @@ class HicDatasetCreator:
 
         export_connection_graph(
                 os.path.join(self.hic_sample_path, "contact_maps", "cool", self.sample_name + ".1000000_balanced.cool"),
-                os.path.join(self.hic_sample_path, self.sample_name + "_hic.nx.pickle"),
+                os.path.join(self.hic_graphs_path, self.sample_name + ".nx.pkl"),
                 os.path.join(self.unitig_2_node_path, self.genome_str + '.pkl'))
 
     def load_hic_edges(self):#-> nx.MultiGraph:
         ret = None
-        with open(os.path.join(self.hic_root_path, self.genome_str, self.sample_name + "_hic.nx.pickle"), 'rb') as f:
+        with open(os.path.join(self.hic_graphs_path, self.genome_str + ".nx.pkl"), 'rb') as f:
+
             ret = pickle.load(f)
         return ret
 
@@ -445,6 +446,8 @@ class HicDatasetCreator:
         #self.pickle_save(utg_2_reads, self.utg_2_reads_path)
         #self.pickle_save(single_read_haplotypes, self.single_read_haplotypes_path)
         self.create_reads_fasta(read_seqs, self.chr_id)  # Add self.chr_id as an argument
+        self.pickle_save(unitig_2_node, self.unitig_2_node_path)
+        self.pickle_save(utg_2_reads, self.utg_2_reads_path)
 
         """
 
@@ -1758,7 +1761,7 @@ class HicDatasetCreator:
         pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
 
         # Load the read_to_node_id mapping
-        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        read_to_node_path = os.path.join(self.unitig_2_node_path, f'{self.genome_str}.pkl')
         with open(read_to_node_path, 'rb') as f:
             read_to_node = pickle.load(f)
 
@@ -1855,7 +1858,7 @@ class HicDatasetCreator:
         
         # Load coverage data
         pog_file = os.path.join(self.pile_o_grams_path, f'{self.genome_str}.coverage.txt')
-        read_to_node_path = os.path.join(self.unitig_to_node_path, f'{self.genome_str}.pkl')
+        read_to_node_path = os.path.join(self.unitig_2_node_path, f'{self.genome_str}.pkl')
         
         with open(read_to_node_path, 'rb') as f:
             read_to_node = pickle.load(f)
