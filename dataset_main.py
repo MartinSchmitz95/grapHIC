@@ -58,8 +58,6 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         
     #if i > 0:
     #   return
-    if i != 7:
-       return
 
     dataset_object.load_chromosome(genome, chr_id, ref_base)
     print(f'Processing {dataset_object.genome_str}...')
@@ -72,9 +70,9 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
         print(f"Created gfa graph {chrN}_{i}")
 
     # run HiC pipeline
-    if gen_step_config['hic']:
+    """if gen_step_config['hic']:
         dataset_object.process_hic()
-        dataset_object.make_hic_edges()
+        dataset_object.make_hic_edges()"""
 
     if gen_step_config['parse_gfa']:
         nx_graph = dataset_object.parse_gfa()
@@ -87,6 +85,7 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
 
     # update graph to include hic edges
     if gen_step_config['hic']:
+        nx_graph = dataset_object.load_nx_graph()
         # not sure if logic code in here is the prettiest, but should work
         hic_graph = dataset_object.load_hic_edges()
         print("loaded Hi-C graph")
@@ -114,15 +113,17 @@ def gen_steps(dataset_object, chrN_, i, gen_step_config, ref_base_path):
 
     if gen_step_config['ml_graphs']:
         nx_graph = dataset_object.load_nx_graph(multi=True)
-        dataset_object.create_jellyfish_features(nx_graph)
+        #dataset_object.create_jellyfish_features(nx_graph)
         #dataset_object.calculate_coverage_statistics(nx_graph)
         #dataset_object.create_pog_features(nx_graph)
         #dataset_object.create_pileup_features(nx_graph)
-        #dataset_object.create_hh_features(nx_graph)
+        dataset_object.create_hh_features(nx_graph)
         dataset_object.pickle_save(nx_graph, dataset_object.merged_graphs_path)
+        exit()
         nx_multi_reduced = dataset_object.convert_to_single_stranded(nx_graph)
         nx_multi_reduced = dataset_object.add_hic_neighbor_weights(nx_multi_reduced)
         dataset_object.save_to_dgl_and_pyg(nx_multi_reduced)
+        dataset_object.split_and_save_pyg(nx_multi_reduced, index=i)
         print(f"Saved DGL and PYG graphs of {chrN}_{i}")
 
     print("Done for one chromosome!")

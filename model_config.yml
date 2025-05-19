@@ -12,7 +12,6 @@ training:
   patience: 2
 
 
-
 paths:
   minigraph_path: '/home/schmitzmf/minigraph/minigraph'
   paftools_path: '/home/schmitzmf/minimap2/misc/paftools.js'

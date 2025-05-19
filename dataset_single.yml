@@ -1,0 +1,101 @@
+paths:
+  sample_profile: hg002hifi
+  pbsim_path: /home/schmitzmf/pbsim3
+  hifiasm_path: /home/schmitzmf/vendor/hifiasm-0.23.0/
+  raven_path: /home/schmitzmf/vendor/heron-raven
+  herro_path: /home/schmitzmf/vendor/herro_folder
+  hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_4
+  raft_path: /home/schmitzmf/vendor/RAFT
+  centromere_coords: /dev/null
+  hic_readsfiles_pairs:
+    - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R1.fastq.gz' ,'/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB002_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R1.fastq.gz','/mnt/sod2-project/csb4/ARG/new_trio/I002C_SRA_uploaded/I002C_OmniC_HHB118_R2.fastq.gz']
+  nextflow_path: "$(which nextflow)"
+  # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
+  # with nf-core tools installed
+  hic_pipeline_path: /home/schmitzmf/prj/nf-core-hic_2.1.0/2_1_0/main.nf
+gen_config:
+  depth: 20
+  threads: 16
+  assembler: hifiasm
+  diploid: True
+  real: False
+  prep_decoding: False
+  raft: False
+gen_steps:
+  sample_reads: False
+  create_graphs: False
+  parse_gfa: True
+  hic: True
+  pile-o-gram: False
+  diploid_features: False
+  ground_truth: True
+  ml_graphs: True
+nfcore_hic:
+  # using dnase mode
+  dnase: True
+  min_cis_dist: 1000
+
+  # relax alignment quality
+  # do local alignment instead of e2e, to respect omnic reads
+  # allow up to 4 alignments; should make alignment to unitigs work better
+  #bwt2_opts_end2end: '--very-sensitive-local -L 26 -N 0 --score-min G,20,8 --local --reorder -k 4'
+  bwt2_opts_end2end: '--very-sensitive-local -L 30 -N 0 --score-min G,20,8 --local --reorder'
+  min_mapq: 5 # mapq not meaningful with --keep
+
+  #split_fastq: True
+
+  # allow multi-mapping reads
+  keep_multi: True
+
+  skip_compartments: True
+  skip_dist_decay: True
+  skip_tads: True
+  skip_mcool: True
+  skip_balancing: False
+  skip_multiqc: False
+nextflow: |
+  workDir = '/raid/scratch/stuleon/unitig-work'
+  profile = 'docker'
+
+  process {
+      resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
+  }
+  process {
+      withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
+          cpus = 32
+          memory = 256.GB
+          time = 5.d
+      }
+  }
+  process {
+      withName:COMBINE_MATES { // make sure it gets enough time
+          time = 24.h
+      }
+  }
+training:
+  i002c_v04_multi_21.chr1: 3
+  i002c_v04_multi_21.chr2: 3
+  i002c_v04_multi_21.chr3: 3
+  i002c_v04_multi_21.chr4: 3
+  i002c_v04_multi_21.chr5: 3
+  i002c_v04_multi_21.chr6: 3
+  i002c_v04_multi_21.chr7: 3
+  i002c_v04_multi_21.chr8: 3
+  i002c_v04_multi_21.chr9: 3
+  i002c_v04_multi_21.chr12: 3
+  i002c_v04_multi_21.chr13: 3
+  i002c_v04_multi_21.chr16: 3
+  i002c_v04_multi_21.chr17: 3
+  i002c_v04_multi_21.chr18: 3
+  i002c_v04_multi_21.chr21: 3
+
+validation:
+  i002c_v04_multi_21.chr11: 3
+  i002c_v04_multi_21.chr20: 3
+
+test:
+  i002c_v04_multi_21.chr10: 3
+  i002c_v04_multi_21.chr19: 3
+  i002c_v04_multi_21.chr15: 3
+  i002c_v04_multi_21.chr22: 3
