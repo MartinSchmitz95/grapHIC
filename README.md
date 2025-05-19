@@ -1,4 +1,4 @@
-# grapHIC: Graph-based Haplotype Inference with Hi-C
+# grapHIC: Graph-Transformer based Hi-C phasing
 
 ![grapHIC Logo](graphic_logo.png)
 
