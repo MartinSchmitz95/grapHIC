@@ -60,13 +60,14 @@ def nx_from_gfa(gfa_path, diploid=False, compute_seqs=False):
                 # print(line)
                 old_read_to_utg[line[4]] = line[1]
 
-            if line[0] == 'S':
+            elif line[0] == 'S':
                 if len(line) == 6:
                     tag, id, sequence, length, count, cov = line
-                if len(line) == 5:
+                elif len(line) == 5:
                     tag, id, sequence, length, cov = line 
-                if len(line) == 4:
+                elif len(line) == 4:
                     tag, id, sequence, length = line
+
                 if sequence == '*':
                     no_seqs_flag = True
                     sequence = '*' * int(length[5:])
@@ -121,7 +122,7 @@ def nx_from_gfa(gfa_path, diploid=False, compute_seqs=False):
 
                 node_idx += 2
 
-            if line[0] == 'L':
+            elif line[0] == 'L':
                 if len(line) == 6:
                     # raven, normal GFA 1 standard
                     tag, id1, orient1, id2, orient2, cigar = line
@@ -141,17 +142,17 @@ def nx_from_gfa(gfa_path, diploid=False, compute_seqs=False):
                     dst_real = read_to_node[id2][0]
                     src_virt = read_to_node[id2][1]
                     dst_virt = read_to_node[id1][1]
-                if orient1 == '+' and orient2 == '-':
+                elif orient1 == '+' and orient2 == '-':
                     src_real = read_to_node[id1][0]
                     dst_real = read_to_node[id2][1]
                     src_virt = read_to_node[id2][0]
                     dst_virt = read_to_node[id1][1]
-                if orient1 == '-' and orient2 == '+':
+                elif orient1 == '-' and orient2 == '+':
                     src_real = read_to_node[id1][1]
                     dst_real = read_to_node[id2][0]
                     src_virt = read_to_node[id2][1]
                     dst_virt = read_to_node[id1][0]
-                if orient1 == '-' and orient2 == '-':
+                elif orient1 == '-' and orient2 == '-':
                     src_real = read_to_node[id1][1]
                     dst_real = read_to_node[id2][1]
                     src_virt = read_to_node[id2][0]
