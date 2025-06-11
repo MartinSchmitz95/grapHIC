@@ -1,5 +1,5 @@
 process GFA_TO_FA {
-    label 'process_medium'
+    label 'process_single'
 
 	 // needs to be called twice on the hifiasm output
 	 // to allow mapping to unitigs
@@ -17,13 +17,13 @@ process GFA_TO_FA {
     def args         = task.ext.args ?: ''
 	 def compress     = true
     def prefix       = task.ext.prefix ?: "${meta.id}"
-    def write_output = compress ? "| gzip > ${prefix}.fa.gzs" : "> ${prefix}.fa"
+    def write_output = compress ? "| gzip > ${prefix}.fa.gz" : "> ${prefix}.fa"
     """
-	 awk '/^S/{print \">\"\$2;print \$3}' ${gfa} ${write_output}
+	 awk '/^S/{print >$2;print $3}' ${gfa} ${write_output}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        awk: \$( awk -W version | head -n 1 | sed -e "s/,.*\$//g" )
+        awk: \$( awk -V | head -n 1 | sed -e "s/,.*\$//g" )
     END_VERSIONS
     """
 }
