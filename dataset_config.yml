@@ -13,24 +13,18 @@ paths:
   nextflow_path: "$(which nextflow)"
   # can get this by calling nf-core pipelines download nf-core/hic and choosing v2.1.0
   # with nf-core tools installed
-  hic_pipeline_path: /home/schmitzmf/prj/nf-core-hic_2.1.0/2_1_0/main.nf
+  hic_pipeline_path: /home/schmitzmf/prj/nf-core-hic_2.1.0/main.nf
+  
 gen_config:
   depth: 20
-  threads: 16
-  assembler: hifiasm
-  diploid: True
   real: False
-  prep_decoding: False
-  raft: False
 gen_steps:
-  sample_reads: False
-  create_graphs: False
-  parse_gfa: False
-  hic: False
-  pile-o-gram: False
-  diploid_features: False
-  ground_truth: False
-  ml_graphs: True
+  align: True
+  hic_graph: True
+  merge: True
+  ftrs: True
+  pyg: True
+
 nfcore_hic:
   # using dnase mode
   dnase: True
@@ -55,26 +49,28 @@ nfcore_hic:
   skip_balancing: False
   skip_multiqc: False
 nextflow: |
-  workDir = '/raid/scratch/stuleon/unitig-work'
-  profile = 'docker'
-
-  process {
-      resourceLimits = [ cpus: 32, memory: 512.GB, time: 72.h ]
-      time = 5.d
-  }
-  process {
-      withName:BOWTIE2_ALIGN { // make sure bowtie gets enough time to run
-          cpus = 20
-          memory = 256.GB
-          time = 5.d
-      }
-  }
-  process {
-      withName:COMBINE_MATES { // make sure it gets enough time
-          time = 24.h
+  workDir = '/home/schmitzmf/scratch/unitig-work'
+  
+  profiles {
+      docker_low_mem {
+          docker.enabled = true
+          docker.runOptions = '--memory=128g --cpus=32'
+          
+          process {
+              resourceLimits = [ cpus: 16, memory: 64.GB, time: 72.h ]
+              
+              withName:BOWTIE2_ALIGN { 
+                  memory =64.GB
+                  cpus = 8
+              }
+              
+              withName:COMBINE_MATES { 
+                  memory = 4.GB
+              }
+          }
       }
   }
 training:
-  i002c_v04.multi_21: 3
+  i002c_v04.multi_21: 50
 
 validation:

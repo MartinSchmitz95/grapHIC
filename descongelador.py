@@ -116,6 +116,22 @@ def to_graph(in_cooler: Cooler, get_idtup: Callable, balance=False) -> nx.MultiG
     #    ret.add_edge(i_tup[1], j_tup[0], weight=w)
     #    ret.add_edge(i_tup[1], j_tup[1], weight=w)
 
+def to_graph_no_utg(in_cooler: Cooler, balance=False) -> nx.MultiGraph:
+    """
+    Takes a coarsened cooler and a lambda mapping unitig names to pairs of node ids and constructs a graph from it.
+    :returns: a networkx MultiGraph with two nodes corresponding to one contig/its complement.
+    The edges in the graph represent hic contacts between the two contigs.
+    """
+
+    # balance and turn into matrix hic contacs
+    start = datetime.datetime.now()
+    print("Starting Graph export", start)
+    mat = in_cooler.matrix(balance=balance)[:]
+    print("Finished balancing in", datetime.datetime.now() - start)
+    ret = nx.from_numpy_array(mat)
+    print("read into networkx in", datetime.datetime.now() - start)
+    return ret
+
 def load_pickle(filepath) -> Dict:
     ret = None
     with open(filepath, 'rb') as f:
@@ -137,18 +153,24 @@ def export_image(intuple, path, scale=id):
     """
     plt.imsave(path, scale(intuple[1]).astype(np.float64))
 
-def export_connection_graph(infile, outfile, unitig_dict):
+def export_connection_graph(infile, outfile, unitig_dict=None):
     print("aggregating cooler")
     c = aggr_chrs(infile)
 
     print("loading unitig dict")
-    unitig_dict = load_pickle(unitig_dict)
+    if unitig_dict is not None:
+        unitig_dict = load_pickle(unitig_dict)
 
     print("constructing graph")
-    graph = to_graph(c, lambda x: unitig_dict[x])
+    if unitig_dict is not None:
+        graph = to_graph(c, lambda x: unitig_dict[x])
+    else:
+        graph = to_graph_no_utg(c)
 
     print("saving graph")
     save_pickle(graph, outfile)
+
+    
 
 def main(args):
     #TODO do proper argparsing later

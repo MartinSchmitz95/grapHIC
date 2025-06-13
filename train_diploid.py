@@ -207,7 +207,10 @@ def process_batch(model, data_selection, data_path, device, optimizer, objective
                 pred_mean.append(predictions.mean().item())
                 pred_std.append(predictions.std().item())
             
-            loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr)
+            # Check if graph has multiple chromosomes
+            has_multiple_chr = len(torch.unique(g.chr)) > 1
+            
+            loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr, multi=has_multiple_chr)
             if aux_loss:
                 aux_loss_term = aux_loss(g.y, predictions)
                 loss += aux_loss_term
