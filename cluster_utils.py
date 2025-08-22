@@ -2,7 +2,7 @@
 # Add these at the top of the file before other imports are processed
 import os
 
-max_threads = "1"
+max_threads = "16"
 os.environ["OMP_NUM_THREADS"] = max_threads  # OpenMP
 os.environ["OPENBLAS_NUM_THREADS"] = max_threads  # OpenBLAS
 os.environ["MKL_NUM_THREADS"] = max_threads  # MKL

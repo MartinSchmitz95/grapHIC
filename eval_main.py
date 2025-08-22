@@ -5,6 +5,7 @@ from skfuzzy.cluster import cmeans
 from sklearn.cluster import KMeans
 import eval
 import baselines
+from SGformer import SGFormerGINEdgeEmbs, SGFormerEdgeEmbs
 
 def get_fuzzy_clustering_from_predictions(preds, fuzzy_thr=0.3):
     # Initialize cluster sets
@@ -122,14 +123,10 @@ def get_hard_clustering_from_embeddings(embs, n_haps=2, random_state=42):
 def run_model(model_type, model_path, graph, config):
     
     if model_type == "pred":
-        from SGformer import SGFormer
-        model = SGFormer(in_channels=config['node_features'], 
-                         hidden_channels=config['hidden_features'], 
-                         out_channels=1, 
-                         trans_num_layers=config['num_trans_layers'], 
-                         gnn_num_layers=config['num_gnn_layers_overlap'], 
-                         gnn_dropout=0,
-                         layer_norm=config['layer_norm'])
+        model = SGFormerEdgeEmbs(in_channels=config['node_features'], hidden_channels=config['hidden_features'],
+                          out_channels=1, trans_num_layers=config['num_trans_layers'],
+                          gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout'],
+                            norm=config['norm'], direct_ftrs=config['direct_ftrs'])
 
     elif model_type == "emb":
         from SGformer_HGC import SGFormer
@@ -149,9 +146,6 @@ def run_model(model_type, model_path, graph, config):
     model.load_state_dict(torch.load(model_path, map_location='cpu'))
     model.eval()
 
-    # Prepare graph features
-    x_addon = torch.abs(graph.y).float().unsqueeze(1)
-    graph.x = torch.cat([graph.x, x_addon], dim=1)
     with torch.no_grad():
         output = model(graph)
 
@@ -192,8 +186,8 @@ def get_args():
     parser = argparse.ArgumentParser(description="Evaluate phasing clustering on synthetic data")
     parser.add_argument("--model_path", type=str, help="Path to trained model")
     parser.add_argument("--graph_path", type=str, help="Path to graph file")
-    parser.add_argument("--output_dir", type=str, default="/home/schmitzmf/scratch/cluster_results/test", help="Output directory for results")
-    parser.add_argument("--mode", type=str, default="mrl", help="mode")
+    parser.add_argument("--output_path", type=str, default="/home/schmitzmf/scratch/cluster_results/test", help="Output directory for results")
+    parser.add_argument("--mode", type=str, default="pred", help="mode")
     parser.add_argument("--config_path", type=str, default="train_config.yml", help="Path to configuration file")
     args = parser.parse_args()
     return args
@@ -219,6 +213,9 @@ def main(args):
         config = yaml.safe_load(file)['training']
 
     print("Computing predictions and clusters...")
+    hard_clusters = None  # Initialize to None
+    fuzzy_clusters = None  # Initialize to None
+    
     if  args.mode == "pred":
         preds = run_model("pred", args.model_path, graph, config)
         # Print statistics of predictions
@@ -255,6 +252,13 @@ def main(args):
         cluster_result_tensor = torch.tensor(cluster_result)
         hard_clusters = cluster_result_tensor[mask].tolist()
         fuzzy_clusters = hard_to_fuzzy(cluster_result)
+    else:
+        print(f"Unknown mode: {args.mode}. Supported modes are: pred, emb, spectral, louvain, lp")
+        return None
+
+    if hard_clusters is None:
+        print("Error: hard_clusters was not computed. Check the mode parameter.")
+        return None
 
     print("Computing metrics...")
     # Print distribution of labels and clusters
@@ -274,6 +278,34 @@ def main(args):
     print(f"Accuracy: {metrics['accuracy']:.3f}")
     print(f"ARI: {metrics['ARI']:.3f}")
     print(f"NMI: {metrics['NMI']:.3f}")
+
+    # Calculate accuracy for different confidence thresholds (only for pred mode)
+    if args.mode == "pred":
+        print("\nThreshold-based accuracy analysis:")
+        print("Threshold | Nodes included | Accuracy")
+        print("-" * 40)
+        
+        # Get predictions for valid nodes only
+        hetero_preds = preds[mask]
+        
+        for threshold in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
+            # Create mask for nodes with confidence above threshold
+            confidence_mask = (torch.abs(hetero_preds) >= threshold)
+            
+            if confidence_mask.sum() > 0:  # Only calculate if there are nodes above threshold
+                # Get labels and predictions for high-confidence nodes
+                high_conf_labels = [hetero_labels[i] for i in range(len(hetero_labels)) if confidence_mask[i]]
+                high_conf_preds = hetero_preds[confidence_mask]
+                
+                # Create hard clusters for high-confidence nodes
+                high_conf_clusters = get_hard_clustering_from_predictions(high_conf_preds)
+                
+                # Calculate accuracy for this subset
+                high_conf_metrics = eval.clustering_metrics(high_conf_labels, high_conf_clusters)
+                
+                print(f"{threshold:9.1f} | {confidence_mask.sum():13d} | {high_conf_metrics['accuracy']:.3f}")
+            else:
+                print(f"{threshold:9.1f} | {confidence_mask.sum():13d} | N/A (no nodes)")
 
     # Print fuzzy clustering statistics
     print("\nFuzzy clustering statistics:")
@@ -317,84 +349,20 @@ if __name__ == "__main__":
     import numpy as np
     from collections import defaultdict
     
-    # Hardcoded graph files and directory
-    GRAPH_DIR = "path_to_dataset"
-    GRAPH_FILES = [
-        "i002c_v04_multi_21_chr10_0.pt",
-        "i002c_v04_multi_21_chr10_1.pt",
-        "i002c_v04_multi_21_chr10_2.pt",
-        "i002c_v04_multi_21_chr19_0.pt",
-        "i002c_v04_multi_21_chr19_1.pt",
-        "i002c_v04_multi_21_chr19_2.pt",
-        "i002c_v04_multi_21_chr15_0.pt",
-        "i002c_v04_multi_21_chr15_1.pt",
-        "i002c_v04_multi_21_chr15_2.pt",
-        "i002c_v04_multi_21_chr22_0.pt",
-        "i002c_v04_multi_21_chr22_1.pt",
-        "i002c_v04_multi_21_chr22_2.pt"
-    ]
     args = get_args()
-    # Process all files and collect results
-    results_by_chrom = defaultdict(list)
     
-    for graph_file in GRAPH_FILES:
-        graph_path = os.path.join(GRAPH_DIR, graph_file)
-        
-        # Parse chromosome and instance from filename
-        parts = graph_file.split('_')
-        chrom = parts[-2]  # e.g., 'chr10'
-        instance = parts[-1].split('.')[0]  # e.g., '0'
-        
-        print(f"\nProcessing {chrom} (instance {instance})...")
-
-        args.graph_path = graph_path
-        # Run the main function and get results
+    # Check if a specific graph_path was provided via command line
+    if args.graph_path is not None:
+        # Single file mode - use the provided graph_path
+        print(f"Processing single file: {args.graph_path}")
         file_results = main(args)
         
         if file_results:
-            # Store results by chromosome
-            results_by_chrom[chrom].append(file_results)
-            
-            # Print individual file results
-            print(f"\nResults for {chrom} (instance {instance}):")
+            print(f"\nResults:")
             print(f"  Accuracy: {file_results['accuracy']:.3f}")
             print(f"  ARI: {file_results['ARI']:.3f}")
             print(f"  NMI: {file_results['NMI']:.3f}")
             print(f"  Omega Index: {file_results['omega']:.3f}" if file_results['omega'] is not None else "  Omega Index: Not available")
-    # Calculate and print averages by chromosome
-    print(f"\n=== SUMMARY OF RESULTS {args.mode} ===")
-    print("\nAverages by chromosome:")
-    
-    # Lists to store all results in chromosome order
-    all_accuracies = []
-    all_aris = []
-    all_nmis = []
-    all_omegas = []
-    
-    for chrom, chrom_results in results_by_chrom.items():
-        avg_accuracy = np.mean([r["accuracy"] for r in chrom_results])
-        avg_ari = np.mean([r["ARI"] for r in chrom_results])
-        avg_nmi = np.mean([r["NMI"] for r in chrom_results])
-        
-        # Handle None values in omega_index
-        omega_values = [r["omega"] for r in chrom_results if r["omega"] is not None]
-        avg_omega = np.mean(omega_values) if omega_values else None
-        
-        print(f"\n{chrom}:")
-        print(f"  Accuracy: {avg_accuracy:.3f}")
-        print(f"  ARI: {avg_ari:.3f}")
-        print(f"  NMI: {avg_nmi:.3f}")
-        print(f"  Omega Index: {avg_omega:.3f}" if avg_omega is not None else "  Omega Index: Not available")
-        
-        # Collect all individual results for this chromosome, rounded to 4 decimal places
-        all_accuracies.extend([round(float(r["accuracy"]), 4) for r in chrom_results])
-        all_aris.extend([round(float(r["ARI"]), 4) for r in chrom_results])
-        all_nmis.extend([round(float(r["NMI"]), 4) for r in chrom_results])
-        all_omegas.extend([round(float(r["omega"]), 4) if r["omega"] is not None else float('nan') for r in chrom_results])
-    
-    # Print lists of all results
-    print("\n=== ALL RESULTS BY METRIC ===")
-    print(f"All Accuracies: {all_accuracies}")
-    print(f"All ARIs: {all_aris}")
-    print(f"All NMIs: {all_nmis}")
-    print(f"All Omega Indices: {all_omegas}")
+    else:
+        print("Error: --graph_path argument is required.")
+        print("Usage: python eval_main.py --model_path <path> --graph_path <path> [other options]")

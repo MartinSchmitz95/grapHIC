@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 import pickle
+import h5py
 
 import cooler
 from cooler import Cooler
@@ -39,8 +40,33 @@ def aggr_chrs(in_path: str) -> Cooler:
     tmp = tempfile.NamedTemporaryFile().name
 
     c = Cooler(in_path)
+    
+    # Handle multi-resolution cooler files (.mcool) where binsize might be None
+    cooler_uri = in_path  # Default to original path
+    if c.binsize is None:
+        # This is likely a multi-resolution cooler, try to get the finest resolution
+        try:
+            # For .mcool files, we need to specify a resolution
+            # Get available resolutions and use the finest one
+            with h5py.File(in_path, 'r') as f:
+                if 'resolutions' in f:
+                    # This is a .mcool file
+                    resolutions = list(f['resolutions'].keys())
+                    finest_res = min([int(res) for res in resolutions])
+                    cooler_uri = f"{in_path}::/resolutions/{finest_res}"
+                    c = Cooler(cooler_uri)
+                else:
+                    raise ValueError(f"Cannot determine binsize for cooler file: {in_path}")
+        except Exception as e:
+            raise ValueError(f"Failed to load cooler file {in_path}. "
+                           f"If this is a multi-resolution file (.mcool), "
+                           f"please specify a resolution. Error: {str(e)}")
+    
+    if c.binsize is None:
+        raise ValueError(f"Could not determine binsize for cooler file: {in_path}")
+    
     factor = np.ceil(max(c.chromsizes)/c.binsize) + 2 # +2 to be on the safe side
-    cooler.coarsen_cooler(in_path, tmp, sys.maxsize, factor)
+    cooler.coarsen_cooler(cooler_uri, tmp, factor, chunksize=sys.maxsize)
 
     return Cooler(tmp)
 
@@ -160,11 +186,10 @@ def export_connection_graph(infile, outfile, unitig_dict=None):
     print("loading unitig dict")
     if unitig_dict is not None:
         unitig_dict = load_pickle(unitig_dict)
-
-    print("constructing graph")
-    if unitig_dict is not None:
+        print("constructing graph with unitig dict")
         graph = to_graph(c, lambda x: unitig_dict[x])
     else:
+        print("constructing graph without unitig dict")
         graph = to_graph_no_utg(c)
 
     print("saving graph")

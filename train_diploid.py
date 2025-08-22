@@ -8,12 +8,89 @@ import numpy as np
 import train_utils
 import argparse
 import yaml
-from SGformer_HGC import SGFormer as SGFormer_HGC
-from SGformer import SGFormer, SGFormerMulti
-from losses_diploid import GlobalPairLossConsise, LocalPairLossConsise, TripletLoss, ContrastiveEmbeddingLoss, SharedToZeroLoss
+#from SGformer_HGC import SGFormer as SGFormer_HGC
+from GIN import HeteroGIN
+from SGformer import SGFormer, SGFormerMulti, SGFormer_NoGate, SGFormerEdgeEmbs, SGFormerGINEdgeEmbs, SGFormer_L_Pred
+from losses_diploid import GlobalPairLossConsise, LocalPairLossConsise, TripletLoss, ContrastiveEmbeddingLoss, SharedToZeroLoss, SimpleBCEWithAbsLoss, MeanZeroLoss
+
+# Limit PyTorch to use only 16 CPU cores
+torch.set_num_threads(16)
 
 emb_losses = ["subcon", "info_nce", "full_cont"]
 pred_losses = ["pairloss_global", "pairloss_local", "triplet_loss"]
+
+def sample_subgraph_by_chromosomes(g, max_nodes, device):
+    """
+    Sample a subgraph by randomly selecting chromosomes until max_nodes is reached.
+    Optimized version for better performance.
+    
+    Args:
+        g: PyTorch Geometric graph
+        max_nodes: Maximum number of nodes allowed
+        device: Device to place tensors on
+    
+    Returns:
+        g_sampled: Sampled subgraph with nodes from selected chromosomes
+    """
+    if g.x.shape[0] <= max_nodes:
+        return g
+    
+    # Get unique chromosomes and shuffle them efficiently
+    unique_chr = torch.unique(g.chr)
+    chr_order = unique_chr[torch.randperm(len(unique_chr), device=device)]
+    
+    # Pre-allocate tensors for efficiency
+    selected_nodes = []
+    total_nodes = 0
+    
+    for chr_id in chr_order:
+        # Get nodes for current chromosome
+        chr_mask = (g.chr == chr_id)
+        chr_nodes = torch.where(chr_mask)[0]
+        chr_node_count = len(chr_nodes)
+        
+        if total_nodes + chr_node_count <= max_nodes:
+            # Add all nodes from this chromosome
+            selected_nodes.append(chr_nodes)
+            total_nodes += chr_node_count
+        else:
+            # Add partial nodes from this chromosome to reach max_nodes
+            remaining_nodes = max_nodes - total_nodes
+            if remaining_nodes > 0:
+                # Randomly sample remaining_nodes from this chromosome
+                perm = torch.randperm(chr_node_count, device=device)
+                selected_nodes.append(chr_nodes[perm[:remaining_nodes]])
+                total_nodes += remaining_nodes
+            break
+
+    # Combine all selected nodes efficiently
+    node_indices = torch.cat(selected_nodes)
+    
+    # Create subgraph efficiently
+    g_sampled = g.clone()
+    g_sampled.x = g.x[node_indices]
+    g_sampled.y = g.y[node_indices]
+    g_sampled.chr = g.chr[node_indices]
+    
+    # Create node mapping for efficient edge remapping
+    node_mapping = torch.zeros(g.x.shape[0], dtype=torch.long, device=device)
+    node_mapping[node_indices] = torch.arange(len(node_indices), device=device)
+    
+    # Filter edges efficiently
+    edge_mask = torch.isin(g.edge_index[0], node_indices) & torch.isin(g.edge_index[1], node_indices)
+    g_sampled.edge_index = g.edge_index[:, edge_mask]
+    
+    # Update edge attributes if they exist
+    if hasattr(g, 'edge_weight'):
+        g_sampled.edge_weight = g.edge_weight[edge_mask]
+    if hasattr(g, 'edge_type'):
+        g_sampled.edge_type = g.edge_type[edge_mask]
+    
+    # Remap node indices efficiently using the pre-computed mapping
+    g_sampled.edge_index[0] = node_mapping[g_sampled.edge_index[0]]
+    g_sampled.edge_index[1] = node_mapping[g_sampled.edge_index[1]]
+
+    return g_sampled
 
 def global_phasing_quotient(y_true, y_pred, chr, debug=False):
     device = y_true.device
@@ -176,13 +253,80 @@ def local_phasing_quotient_no_debug(y_true, y_pred, chr, edge_index, edge_type):
     print(f"Local Phasing Quotient: {total_correct}/{total_edges} = {final_metric:.3f}")
     return final_metric
 
+def homo_separation(y_true, y_pred, debug=False):
+    """
+    Measures how well homozygous nodes (y=0) are separated from heterozygous nodes (y=-1, y=1).
+    Tries different epsilon thresholds and returns the best F1 score.
+    Nodes with |prediction| > epsilon are classified as heterozygous.
+    """
+    device = y_true.device
+    y_true = y_true.to(device)
+    y_pred = y_pred.to(device)
+    
+    # Create binary labels: 0 for homozygous (y=0), 1 for heterozygous (y!=0)
+    homo_mask = (y_true == 0)
+    hetero_mask = (y_true != 0)
+    
+    homo_count = homo_mask.sum().item()
+    hetero_count = hetero_mask.sum().item()
+    
+    if homo_count == 0 or hetero_count == 0:
+        if debug:
+            print(f"Homo separation: insufficient data (homo: {homo_count}, hetero: {hetero_count})")
+        return 0.0, 0.0
+    
+    # Create binary ground truth labels
+    binary_true = hetero_mask.float()  # 1 for heterozygous, 0 for homozygous
+    
+    # Get absolute predictions
+    abs_pred = torch.abs(y_pred)
+    
+    # Try different epsilon thresholds
+    # Use fixed thresholds from 0.01 to 1.00 with 0.01 increments
+    epsilons = torch.arange(0.01, 1.01, 0.01, device=device)
+    
+    best_f1 = 0.0
+    best_epsilon = 0.0
+    
+    for epsilon in epsilons:
+        # Predict heterozygous if |prediction| > epsilon
+        binary_pred = (abs_pred > epsilon).float()
+        
+        # Calculate true positives, false positives, and false negatives
+        true_positives = ((binary_pred == 1) & (binary_true == 1)).sum().item()
+        false_positives = ((binary_pred == 1) & (binary_true == 0)).sum().item()
+        false_negatives = ((binary_pred == 0) & (binary_true == 1)).sum().item()
+        
+        # Calculate precision and recall
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        
+        # Calculate F1 score
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        if f1 > best_f1:
+            best_f1 = f1
+            best_epsilon = epsilon.item()
+    
+    if debug:
+        # Additional debug info
+        homo_mean_abs = abs_pred[homo_mask].mean().item() if homo_count > 0 else 0
+        hetero_mean_abs = abs_pred[hetero_mask].mean().item() if hetero_count > 0 else 0
+        print(f"Homo separation: best_f1={best_f1:.4f}, best_epsilon={best_epsilon:.4f}")
+        print(f"  homo_mean_abs={homo_mean_abs:.4f}, hetero_mean_abs={hetero_mean_abs:.4f}")
+        print(f"  homo_count={homo_count}, hetero_count={hetero_count}")
+    
+    return best_f1, best_epsilon
+
 def process_batch(model, data_selection, data_path, device, optimizer, objective, aux_loss, config, epoch, mode, is_training=True, project_embeddings=False):
     losses = []
     pred_mean, pred_std = [], []
     compute_metrics = (epoch % config['compute_metrics_every'] == 0)
-    if not project_embeddings:
-        compute_metrics = False
+    #if not project_embeddings:
+    #    compute_metrics = False
     global_phasing_metrics, local_phasing_metrics = [], []
+    homo_separation_metrics = []
+    homo_separation_epsilons = []
     
     phase = "Training" if is_training else "Validating"
     
@@ -190,15 +334,20 @@ def process_batch(model, data_selection, data_path, device, optimizer, objective
         print(f"{phase} graph {graph_name}, id: {idx} of {len(data_selection)}")
         g = torch.load(os.path.join(data_path, graph_name + '.pt'), map_location=device)
         
-        x_addon = torch.abs(g.y).float().unsqueeze(1).to(device)
-        g.x = torch.cat([g.x, x_addon], dim=1)
+        #x_addon = torch.abs(g.y).float().unsqueeze(1).to(device)
+        #g.x = torch.cat([g.x, x_addon], dim=1)
+        #print(g.x)
         #g.x = torch.zeros_like(torch.abs(g.y).float().unsqueeze(1).to(device))
         if not hasattr(g, 'chr'):
-            g.chr = torch.ones(g.x.shape[0], dtype=torch.long, device=g.x.device)
+            g.chr = torch.ones(g.x.shape[0], dtype=torch.long, device=device)
+        
+        # Apply subgraph sampling if max_nodes is specified
+        if 'max_nodes' in config and config['max_nodes'] > 0:
+            g = sample_subgraph_by_chromosomes(g, config['max_nodes'], device)
+        
         if is_training:
             optimizer.zero_grad()
         edge_weight = g.edge_weight
-        
         # Use torch.no_grad for validation
         with torch.set_grad_enabled(is_training):
             predictions = model(g)
@@ -209,8 +358,16 @@ def process_batch(model, data_selection, data_path, device, optimizer, objective
             
             # Check if graph has multiple chromosomes
             has_multiple_chr = len(torch.unique(g.chr)) > 1
+            print(f"has_multiple_chr: {has_multiple_chr}")
+
             
-            loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr, multi=has_multiple_chr)
+            # Check if the loss function needs the graph parameter
+            if hasattr(objective, 'multi_chr_forward') and 'g' in objective.multi_chr_forward.__code__.co_varnames:
+                # Loss functions that need the graph parameter (LocalPairLoss, LocalPairLossConsise, etc.)
+                loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g, g.chr, multi=has_multiple_chr)
+            else:
+                # Loss functions that don't need the graph parameter (GlobalPairLossConsise, etc.)
+                loss = objective(g.y, predictions, g.edge_index[0], g.edge_index[1], g.chr, multi=has_multiple_chr)
             if aux_loss:
                 aux_loss_term = aux_loss(g.y, predictions)
                 loss += aux_loss_term
@@ -226,6 +383,9 @@ def process_batch(model, data_selection, data_path, device, optimizer, objective
                 global_phasing_metrics.append(global_phasing_quotient(g.y, predictions, g.chr, debug=debug))
                 local_phasing_metrics.append(local_phasing_quotient(g.y, predictions, g.chr, 
                                                                 g.edge_index, g.edge_type, debug=debug))
+                homo_accuracy, homo_epsilon = homo_separation(g.y, predictions, debug=debug)
+                homo_separation_metrics.append(homo_accuracy)
+                homo_separation_epsilons.append(homo_epsilon)
     
     prefix = "valid_" if not is_training else "train_"
     metrics = {
@@ -237,7 +397,9 @@ def process_batch(model, data_selection, data_path, device, optimizer, objective
     if compute_metrics:
         metrics.update({
             f'{prefix}global_phasing': np.mean(global_phasing_metrics),
-            f'{prefix}local_phasing': np.mean(local_phasing_metrics)
+            f'{prefix}local_phasing': np.mean(local_phasing_metrics),
+            f'{prefix}homo_separation': np.mean(homo_separation_metrics),
+            f'{prefix}homo_epsilon': np.mean(homo_separation_epsilons)
         })
     
     return metrics
@@ -261,7 +423,9 @@ def train(model, data_path, train_selection, valid_selection, device, mode, proj
     else:
         raise ValueError(f"Invalid mode: {mode}")
     if mode in pred_losses:
-        aux_loss = SharedToZeroLoss(weight=config['aux_loss_weight']).to(device)
+        #aux_loss = SharedToZeroLoss(weight=config['aux_loss_weight']).to(device)
+        #aux_loss = SimpleBCEWithAbsLoss(weight=config['aux_loss_weight']).to(device)
+        aux_loss = MeanZeroLoss(weight=config['aux_loss_weight']).to(device)
     else:
         aux_loss = None
 
@@ -301,19 +465,33 @@ def train(model, data_path, train_selection, valid_selection, device, mode, proj
             if valid_metrics:
                 log_dict.update(valid_metrics)
             wandb.log(log_dict)
+            
+            # Print metrics to console
+            print(f"\nEpoch {epoch} Metrics:")
+            # Only print loss and phasing metrics
+            metrics_to_print = ['train_loss', 'valid_loss', 'train_global_phasing', 'valid_global_phasing', 'train_local_phasing', 'valid_local_phasing', 'train_homo_separation', 'valid_homo_separation', 'train_homo_epsilon', 'valid_homo_epsilon']
+            for key in metrics_to_print:
+                if key in log_dict:
+                    value = log_dict[key]
+                    if isinstance(value, float):
+                        print(f"  {key}: {value:.4f}")
+                    else:
+                        print(f"  {key}: {value}")
+            print("-" * 50)
 
-            if (epoch+1) % 10 == 0:
+            if (epoch+1) % 100 == 0:
                 model_path = os.path.join(save_model_path, f'{args.run_name}_{epoch+1}.pt')
                 torch.save(model.state_dict(), model_path)
                 print("Saved model")
 
-def get_graph_data(data_path, data_selection):
+def get_graph_data(data_path, data_selection, config=None):
     """
     Analyze graph data and display statistics about nodes and edges.
     
     Args:
         data_path: Path to the directory containing graph data
         data_selection: List of graph names to analyze
+        config: Configuration dictionary containing max_nodes parameter
     
     Returns:
         dict: Dictionary containing statistics about the graphs
@@ -332,8 +510,19 @@ def get_graph_data(data_path, data_selection):
     edge_type0_counts = []
     edge_type1_counts = []
     
+    # Lists to store node features for calculating mean and std
+    all_node_features = []
+    
     for graph_name in data_selection:
         g = torch.load(os.path.join(data_path, graph_name + '.pt'))
+        
+        # Apply subgraph sampling if max_nodes is specified in config
+        if config and 'max_nodes' in config and config['max_nodes'] > 0:
+            device = torch.device('cpu')  # Use CPU for analysis
+            g = sample_subgraph_by_chromosomes(g, config['max_nodes'], device)
+        
+        # Collect node features
+        all_node_features.append(g.x)
         
         # Count nodes
         num_nodes = g.x.shape[0]
@@ -355,6 +544,12 @@ def get_graph_data(data_path, data_selection):
             
             edge_type0_counts.append(num_edges_type0)
             edge_type1_counts.append(num_edges_type1)
+    
+    # Calculate node feature statistics
+    if all_node_features:
+        all_features = torch.cat(all_node_features, dim=0)
+        feature_means = all_features.mean(dim=0)
+        feature_stds = all_features.std(dim=0)
     
     # Calculate statistics
     num_graphs = len(data_selection)
@@ -397,6 +592,12 @@ def get_graph_data(data_path, data_selection):
         print(f"  Edges (type 0): total={stats['edges_type0_total']}, mean={stats['edges_type0_mean']:.2f}, std={stats['edges_type0_std']:.2f}, min={stats['edges_type0_min']}, max={stats['edges_type0_max']}")
         print(f"  Edges (type 1): total={stats['edges_type1_total']}, mean={stats['edges_type1_mean']:.2f}, std={stats['edges_type1_std']:.2f}, min={stats['edges_type1_min']}, max={stats['edges_type1_max']}")
     
+    # Print node feature statistics
+    if all_node_features:
+        print("\nNode Feature Statistics:")
+        for i, (mean, std) in enumerate(zip(feature_means, feature_stds)):
+            print(f"  Feature {i}: mean={mean:.4f}, std={std:.4f}")
+    
     return stats
 
 if __name__ == '__main__':
@@ -432,6 +633,25 @@ if __name__ == '__main__':
     valid_data = train_utils.get_numbered_graphs(valid_selection, starting_counts=train_selection)
     project_embeddings = args.project
 
+    # Verify device and print device information
+    if device.startswith('cuda'):
+        if not torch.cuda.is_available():
+            print(f"Warning: CUDA device {device} requested but CUDA is not available. Falling back to CPU.")
+            device = 'cpu'
+        else:
+            # Get the GPU index from the device string
+            gpu_idx = int(device.split(':')[1]) if ':' in device else 0
+            if gpu_idx >= torch.cuda.device_count():
+                print(f"Warning: GPU {gpu_idx} not available. Available GPUs: {torch.cuda.device_count()}. Falling back to GPU 0.")
+                device = f'cuda:0'
+            else:
+                # Set the current device
+                torch.cuda.set_device(gpu_idx)
+                print(f"Using GPU {gpu_idx}: {torch.cuda.get_device_name(gpu_idx)}")
+                print(f"GPU Memory: {torch.cuda.get_device_properties(gpu_idx).total_memory / 1024**3:.1f} GB")
+    else:
+        print(f"Using device: {device}")
+
     if not os.path.exists(args.save_model_path):
         os.makedirs(args.save_model_path)
 
@@ -451,10 +671,40 @@ if __name__ == '__main__':
             trans_dropout= 0, #config['dropout'],
             gnn_num_layers=config['num_gnn_layers'],
             gnn_dropout= config['dropout'],
-            layer_norm=config['layer_norm']
+            layer_norm=config['layer_norm'],
+            direct_ftrs=config['direct_ftrs']
         ).to(device)
     else:
-        model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'], out_channels=1, trans_num_layers=config['num_trans_layers'], gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout'], layer_norm=config['layer_norm']).to(device)
+        """model = SGFormer(in_channels=config['node_features'], hidden_channels=config['hidden_features'],
+                          out_channels=1, trans_num_layers=config['num_trans_layers'],
+                          gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout'],
+                            norm=config['norm'], direct_ftrs=config['direct_ftrs']).to(device)"""
+        
+        model = SGFormerEdgeEmbs(in_channels=config['node_features'], hidden_channels=config['hidden_features'],
+                          out_channels=1, trans_num_layers=config['num_trans_layers'],
+                          gnn_num_layers=config['num_gnn_layers'], gnn_dropout=config['gnn_dropout'],
+                            norm=config['norm'], direct_ftrs=config['direct_ftrs']).to(device)
+        """model = HeteroGIN(
+            in_channels=config['node_features'],
+            hidden_channels=config['hidden_features'],
+            out_channels=1,  # For prediction tasks, output scalar per node
+            num_layers=config['num_gnn_layers'],
+            dropout=config['gnn_dropout'],
+            direct_ftrs=config['direct_ftrs']
+        ).to(device)
+        
+        
+        model = SGFormer_NoGate(
+            in_channels=config['node_features'],
+            hidden_channels=config['hidden_features'],
+            out_channels=1,
+            trans_num_layers=config['num_trans_layers'],
+            trans_dropout=0,
+            gnn_num_layers=config['num_gnn_layers'],
+            gnn_dropout=config['gnn_dropout'],
+            edge_feature_dim=1,
+            direct_ftrs=config['direct_ftrs']
+        ).to(device)"""
     #latest change: half hidden channels, reduce gnn_layers, remove dropout
     to_undirected = False
     model.to(device)
@@ -464,10 +714,10 @@ if __name__ == '__main__':
 
     # Get dataset statistics before training
     print("Analyzing training data:")
-    train_stats = get_graph_data(data_path, train_data)
+    train_stats = get_graph_data(data_path, train_data, config)
     if valid_data:
         print("\nAnalyzing validation data:")
-        valid_stats = get_graph_data(data_path, valid_data)
+        valid_stats = get_graph_data(data_path, valid_data, config)
 
     train(model, data_path, train_data, valid_data, device, mode, project_embeddings, config)
 

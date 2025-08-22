@@ -3,11 +3,12 @@ training:
   num_epochs: 10000
   num_gnn_layers: 8
   num_trans_layers: 3
-  hidden_features: 512
-  emb_dim: 128
+  hidden_features: 128
+  emb_dim: 64
+  direct_ftrs: False
   use_standard_attention: False
   projection_dim: 16
-  node_features: 1
+  node_features: 4
   gnn_dropout: 0.0
   lr: 0.0001
   aux_loss_weight: 0.02
@@ -22,4 +23,5 @@ training:
   batch_size: 4096
   evaluate: True
   visualize: False
-  layer_norm: True  
+  norm: 'pair'
+  max_nodes: 10000  

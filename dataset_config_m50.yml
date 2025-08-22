@@ -1,0 +1,97 @@
+paths:
+  sample_profile: hg002hifi
+  pbsim_path: /home/schmitzmf/pbsim3
+  hifiasm_path: /home/schmitzmf/vendor/hifiasm-0.23.0/
+  raven_path: /home/schmitzmf/vendor/heron-raven
+  herro_path: /home/schmitzmf/vendor/herro_folder
+  hifiasm_dump: /home/schmitzmf/scratch/dumps/hifiasm_dump_4
+  raft_path: /home/schmitzmf/vendor/RAFT
+  centromere_coords: /dev/null
+  hic_readsfiles_pairs:
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s0_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s0_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s1_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s1_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s2_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s2_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s3_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s3_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s4_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s4_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s5_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s5_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s6_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s6_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s7_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s7_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s8_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s8_R2.fastq.gz']
+    - ['/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s9_R1.fastq.gz', '/mnt/sod2-project/csb4/wgs/martin/genome_references/i002c_v04/hic_m50_s9_R2.fastq.gz']
+  
+gen_config:
+  depth: 20
+  real: False
+  parallel_jobs: 32  # Number of parallel jobs for BWA/samtools
+  
+  # Hi-C normalization and denoising configuration
+  hic_normalization:
+    # ICE normalization (Iterative Correction and Eigenvector decomposition)
+    # Removes systematic biases in Hi-C contact matrices
+    apply_ice: true
+    ice_max_iter: 100      # Maximum iterations for ICE convergence
+    ice_tolerance: 1e-6    # Convergence tolerance
+    
+    # Outlier removal
+    # Removes extremely high-weight contacts that are likely artifacts
+    remove_outliers: true
+    outlier_percentile: 99.5  # Remove contacts above this percentile
+    
+    # Quality filtering
+    # Removes low-quality contacts based on mapping quality
+    apply_quality_filter: true
+    min_quality: 10        # Minimum mapping quality score
+
+gen_steps:
+  align: True
+  hic_graph: True
+  merge: True
+  ftrs: True
+  pyg: True
+
+training:
+  i002c_v04.chr1: 30
+  i002c_v04.chr2: 30
+  i002c_v04.chr3: 30
+  i002c_v04.chr4: 30
+  i002c_v04.chr5: 30
+  i002c_v04.chr6: 30
+  i002c_v04.chr7: 30
+  i002c_v04.chr8: 30
+  i002c_v04.chr9: 30
+  i002c_v04.chr10: 30
+  i002c_v04.chr11: 30
+  i002c_v04.chr12: 30
+  i002c_v04.chr13: 30
+  i002c_v04.chr15: 30
+  i002c_v04.chr16: 30
+  i002c_v04.chr17: 30
+  i002c_v04.chr18: 30
+  i002c_v04.chr19: 30
+  i002c_v04.chr20: 30
+  i002c_v04.chr21: 30
+  i002c_v04.chr22: 30
+
+
+validation:
+  i002c_v04.chr1: 5
+  i002c_v04.chr2: 5
+  i002c_v04.chr3: 5
+  i002c_v04.chr4: 5
+  i002c_v04.chr5: 5
+  i002c_v04.chr6: 5
+  i002c_v04.chr7: 5
+  i002c_v04.chr8: 5
+  i002c_v04.chr9: 5
+  i002c_v04.chr10: 5
+  i002c_v04.chr11: 5
+  i002c_v04.chr12: 5
+  i002c_v04.chr13: 5
+  i002c_v04.chr15: 5
+  i002c_v04.chr16: 5
+  i002c_v04.chr17: 5
+  i002c_v04.chr18: 5
+  i002c_v04.chr19: 5
+  i002c_v04.chr20: 5
+  i002c_v04.chr21: 5
+  i002c_v04.chr22: 5

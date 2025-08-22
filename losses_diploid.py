@@ -26,15 +26,65 @@ class ContrastiveEmbeddingLoss(nn.Module):
         self.mode = mode
         self.n_samples = n_samples  # Used for '1_vs_n' and 'n_vs_n' modes
         
-    def forward(self, labels, embeddings, src, dst, chr):
-        if self.mode == 'all_vs_all':
-            return self._all_vs_all_forward(labels, embeddings)
-        elif self.mode == '1_vs_n':
-            return self._one_vs_n_forward(labels, embeddings)
-        elif self.mode == 'n_vs_n':
-            return self._n_vs_n_forward(labels, embeddings)
+    def forward(self, labels, embeddings, src, dst, chr, multi=False):
+        if multi:
+            return self.multi_chr_forward(labels, embeddings, src, dst, chr)
         else:
-            raise ValueError(f"Unknown mode: {self.mode}. Choose from 'all_vs_all', '1_vs_n', or 'n_vs_n'")
+            if self.mode == 'all_vs_all':
+                return self._all_vs_all_forward(labels, embeddings)
+            elif self.mode == '1_vs_n':
+                return self._one_vs_n_forward(labels, embeddings)
+            elif self.mode == 'n_vs_n':
+                return self._n_vs_n_forward(labels, embeddings)
+            else:
+                raise ValueError(f"Unknown mode: {self.mode}. Choose from 'all_vs_all', '1_vs_n', or 'n_vs_n'")
+    
+    def multi_chr_forward(self, labels, embeddings, src, dst, chr):
+        """Multi-chromosome forward pass that processes each chromosome separately."""
+        device = embeddings.device
+        
+        # Get unique chromosomes
+        unique_chr = torch.unique(chr)
+        
+        total_loss = 0.0
+        total_valid_chromosomes = 0
+        
+        # Process each chromosome separately
+        for c in unique_chr:
+            # Create mask for current chromosome
+            chr_mask = (chr == c)
+            chr_nodes = torch.where(chr_mask)[0]
+            
+            if len(chr_nodes) < 2:  # Need at least 2 nodes for contrastive learning
+                continue
+            
+            # Get labels and embeddings for this chromosome
+            chr_labels = labels[chr_nodes]
+            chr_embeddings = embeddings[chr_nodes]
+            
+            # Check if we have different labels within this chromosome
+            unique_chr_labels = torch.unique(chr_labels)
+            if len(unique_chr_labels) < 2 and 0 not in unique_chr_labels:
+                continue  # Skip if all nodes have the same label (except 0)
+            
+            # Compute loss for this chromosome using the specified mode
+            if self.mode == 'all_vs_all':
+                chr_loss = self._all_vs_all_forward(chr_labels, chr_embeddings)
+            elif self.mode == '1_vs_n':
+                chr_loss = self._one_vs_n_forward(chr_labels, chr_embeddings)
+            elif self.mode == 'n_vs_n':
+                chr_loss = self._n_vs_n_forward(chr_labels, chr_embeddings)
+            else:
+                raise ValueError(f"Unknown mode: {self.mode}. Choose from 'all_vs_all', '1_vs_n', or 'n_vs_n'")
+            
+            if chr_loss.item() > 0:  # Only add non-zero losses
+                total_loss += chr_loss
+                total_valid_chromosomes += 1
+        
+        if total_valid_chromosomes > 0:
+            return total_loss / total_valid_chromosomes
+        else:
+            return torch.tensor(0.0, device=device, requires_grad=True)
     
     def _all_vs_all_forward(self, labels, embeddings):
         """Original all-vs-all implementation."""
@@ -368,7 +418,68 @@ class SupConLoss(nn.Module):
         self.contrast_mode = contrast_mode
         self.base_temperature = base_temperature
 
-    def forward(self, labels, features, src, dst , chr):
+    def forward(self, labels, features, src, dst, chr, multi=False):
+        """Compute supervised contrastive loss for node embeddings.
+        
+        Args:
+            features: Node embeddings of shape [num_nodes, embedding_dim].
+            labels: Node labels of shape [num_nodes]. Values should be 1, -1, or 0.
+                   Anchors should be 1 or -1 labeled, samples with class 0 count as positive class.
+            multi: If True, process each chromosome separately.
+        Returns:
+            A loss scalar.
+        """
+        if multi:
+            return self.multi_chr_forward(labels, features, src, dst, chr)
+        else:
+            return self.single_chr_forward(labels, features, src, dst, chr)
+    
+    def multi_chr_forward(self, labels, features, src, dst, chr):
+        """Multi-chromosome forward pass that processes each chromosome separately."""
+        device = features.device
+        
+        # Get unique chromosomes
+        unique_chr = torch.unique(chr)
+        
+        total_loss = 0.0
+        total_valid_chromosomes = 0
+        
+        # Process each chromosome separately
+        for c in unique_chr:
+            # Create mask for current chromosome
+            chr_mask = (chr == c)
+            chr_nodes = torch.where(chr_mask)[0]
+            
+            if len(chr_nodes) < 2:  # Need at least 2 nodes for contrastive learning
+                continue
+            
+            # Get labels and features for this chromosome
+            chr_labels = labels[chr_nodes]
+            chr_features = features[chr_nodes]
+            
+            # Check if we have valid anchors (label 1 or -1) within this chromosome
+            valid_anchors = (chr_labels != 0)
+            if not valid_anchors.any():
+                continue  # Skip if no valid anchors
+            
+            # Check if we have different labels within this chromosome
+            unique_chr_labels = torch.unique(chr_labels)
+            if len(unique_chr_labels) < 2 and 0 not in unique_chr_labels:
+                continue  # Skip if all nodes have the same label (except 0)
+            
+            # Compute loss for this chromosome
+            chr_loss = self.single_chr_forward(chr_labels, chr_features, None, None, None)
+            
+            if chr_loss.item() > 0:  # Only add non-zero losses
+                total_loss += chr_loss
+                total_valid_chromosomes += 1
+        
+        if total_valid_chromosomes > 0:
+            return total_loss / total_valid_chromosomes
+        else:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+    
+    def single_chr_forward(self, labels, features, src, dst, chr):
         """Compute supervised contrastive loss for node embeddings.
         
         Args:
@@ -606,11 +717,11 @@ class GlobalPairLossConsise(nn.Module):
 
     def forward(self, y_true, y_pred, src, dst, chr, multi=False):
         if multi:
-            return self.multi_chr_forward(y_true, y_pred, src, dst, chr)
+            return self.multi_chr_forward(y_true, y_pred, chr)
         else:
-            return self.single_chr_forward(y_true, y_pred, src, dst, chr)
+            return self.single_chr_forward(y_true, y_pred)
 
-    def single_chr_forward(self, y_true, y_pred, src, dst, chr):
+    def single_chr_forward(self, y_true, y_pred):
         nodes = list(range(len(y_true)))
         shuffled_nodes = nodes.copy()
         random.shuffle(shuffled_nodes)
@@ -643,7 +754,7 @@ class GlobalPairLossConsise(nn.Module):
         
         return weighted_loss.mean()
 
-    def multi_chr_forward(self, y_true, y_pred, src, dst, chr):
+    def multi_chr_forward(self, y_true, y_pred, chr):
         # Get unique chromosomes and their counts
         unique_chr, chr_counts = torch.unique(chr, return_counts=True)
         
@@ -692,14 +803,14 @@ class GlobalPairLossConsise(nn.Module):
         
         # Calculate the unified loss term
         loss_term = torch.max(torch.zeros_like(margin),
-                             margin - s * torch.abs(y_pred_i - y_pred_j)**2)
+                             margin - s * torch.abs(y_pred_i - y_pred_j))**2
         
-        # Apply weights based on whether labels are same or different
+        """# Apply weights based on whether labels are same or different
         weighted_loss = torch.where(s == -1.0,
                                    self.lambda_1 * loss_term,
-                                   self.lambda_2 * loss_term)
+                                   self.lambda_2 * loss_term)"""
         
-        return weighted_loss.mean()
+        return loss_term.mean()
     
     
 class GlobalPairLoss(nn.Module):
@@ -746,6 +857,63 @@ class GlobalPairLoss(nn.Module):
 
         return loss
 
+    def multi_chr_forward_unified_not_in_use(self, y_true, y_pred, src, dst, chr):
+            # Get unique chromosomes and their counts
+            unique_chr, chr_counts = torch.unique(chr, return_counts=True)
+            
+            # Filter out chromosomes with less than 2 nodes
+            valid_mask = chr_counts >= 2
+            unique_chr = unique_chr[valid_mask]
+            
+            if len(unique_chr) == 0:
+                return torch.tensor(0.0, device=y_true.device, requires_grad=True)
+
+            # Create a mask tensor for all chromosomes at once
+            chr_masks = chr.unsqueeze(0) == unique_chr.unsqueeze(1)  # Broadcasting
+            
+            # Initialize tensors to store results for all chromosomes
+            all_true_i = []
+            all_true_j = []
+            all_pred_i = []
+            all_pred_j = []
+            
+            for idx, mask in enumerate(chr_masks):
+                # Get nodes for current chromosome
+                chr_nodes = torch.where(mask)[0]
+                
+                # Create shuffled pairs within chromosome
+                shuffled_indices = torch.randperm(len(chr_nodes))
+                
+                # Gather the values using the masks
+                all_true_i.append(y_true[chr_nodes])
+                all_true_j.append(y_true[chr_nodes[shuffled_indices]])
+                all_pred_i.append(y_pred[chr_nodes])
+                all_pred_j.append(y_pred[chr_nodes[shuffled_indices]])
+
+            # Stack all tensors
+            y_true_i = torch.cat(all_true_i)
+            y_true_j = torch.cat(all_true_j)
+            y_pred_i = torch.cat(all_pred_i)
+            y_pred_j = torch.cat(all_pred_j)
+
+            # Calculate the indicators (same as single_chr_forward)
+            indicator_same_label = (y_true_i == y_true_j).float()
+            indicator_diff_label = (y_true_i != y_true_j).float()
+
+            # Calculate the margin
+            margin = torch.abs(y_true_i - y_true_j)
+
+            # Calculate the loss terms (same as single_chr_forward)
+            term_same_label = indicator_same_label * (y_pred_i - y_pred_j) ** 2
+            term_diff_label = indicator_diff_label * torch.max(torch.zeros_like(margin),
+                                                        margin - torch.abs(y_pred_i - y_pred_j)) ** 2
+
+            # Combine the terms with the weights (same as single_chr_forward)
+            loss = (self.lambda_1 * term_same_label.mean() +
+                    self.lambda_2 * term_diff_label.mean())
+            
+            return loss
+
     def multi_chr_forward(self, y_true, y_pred, src, dst, chr):
         # Get unique chromosomes and their counts
         unique_chr, chr_counts = torch.unique(chr, return_counts=True)
@@ -785,22 +953,30 @@ class GlobalPairLoss(nn.Module):
         y_pred_i = torch.cat(all_pred_i)
         y_pred_j = torch.cat(all_pred_j)
 
-        # Calculate indicators for all pairs at once
+        # Calculate the indicators (same as single_chr_forward)
         indicator_same_label = (y_true_i == y_true_j).float()
         indicator_diff_label = (y_true_i != y_true_j).float()
 
-        # Calculate margin for all pairs at once
+        # Calculate the margin
         margin = torch.abs(y_true_i - y_true_j)
 
-        # Calculate loss terms for all pairs at once
-        term_same_label = indicator_same_label * (y_pred_i - y_pred_j) ** 2
-        term_diff_label = indicator_diff_label * torch.max(torch.zeros_like(margin),
-                                                   margin - torch.abs(y_pred_i - y_pred_j)) ** 2
-
-        # Calculate the final loss by averaging across all samples
-        loss = (self.lambda_1 * term_same_label.mean() +
-                self.lambda_2 * term_diff_label.mean())
-
+        # Calculate sign variable s: -1 if same label, +1 if different label
+        s = torch.where(y_true_i == y_true_j, 
+                        torch.tensor(-1.0, device=y_true.device),
+                        torch.tensor(1.0, device=y_true.device))
+        
+        # Calculate the prediction difference |p_q - p_k|
+        pred_diff = torch.abs(y_pred_i - y_pred_j)
+        
+        # Calculate the loss term: max(0, |y_q - y_k| - s_{qk} * |p_q - p_k|)^2
+        loss_term = torch.max(torch.zeros_like(margin),
+                             margin - s * pred_diff) ** 2
+        
+        # Calculate the mean loss (1/N * sum)
+        loss = loss_term.mean()
+        
+        
+        
         return loss
 
 class SharedToZeroLoss(nn.Module):
@@ -809,7 +985,7 @@ class SharedToZeroLoss(nn.Module):
         super(SharedToZeroLoss, self).__init__()
         self.weight = weight
         
-    def forward(self, y_true, y_pred, src=None, dst=None, g=None, chr=None, multi=False):
+    def forward(self, y_true, y_pred, push_non_zeros=True):
         """
         Args:
             y_true: Node labels
@@ -826,11 +1002,64 @@ class SharedToZeroLoss(nn.Module):
         
         # Calculate squared error for nodes with label 0
         zero_loss = (y_pred[zero_mask] ** 2).mean()
+
+        if push_non_zeros:
+            # Calculate loss for non-shared nodes (pushing towards ±1)
+            nonzero_mask = (y_true != 0)
+            nonzero_loss = ((torch.abs(y_pred[nonzero_mask]) - 1.0) ** 2).mean()
+        else:
+            nonzero_loss = 0.0
         
-        return self.weight * zero_loss
+        return self.weight * (zero_loss + nonzero_loss)
     
+class SimpleBCEWithAbsLoss(nn.Module):
+    """Simple BCE loss using absolute values of predictions.
+    
+    Applies BCE loss to |y_pred| with the original labels as targets.
+    """
+    def __init__(self, weight=1.0):
+        super(SimpleBCEWithAbsLoss, self).__init__()
+        self.weight = weight
+        
+    def forward(self, y_true, y_pred, src=None, dst=None, g=None, chr=None, multi=False):
+        """
+        Args:
+            y_true: Node labels (-1, 0, 1)
+            y_pred: Node predictions
+            src, dst, g, chr: Not used but included for API compatibility
+            multi: Not used but included for API compatibility
+        """
+        # Convert labels to binary format for BCE
+        targets = torch.abs(y_true).float()  # Convert to float type
+        
+        # Use absolute values of predictions and apply sigmoid
+        abs_preds = torch.abs(y_pred)
+        
+        # Apply BCE loss
+        bce_loss = F.binary_cross_entropy(abs_preds, targets)
 
+        return self.weight * bce_loss
 
+class MeanZeroLoss(nn.Module):
+    """Loss that pushes the mean of all predictions towards 0."""
+    def __init__(self, weight=1.0):
+        super(MeanZeroLoss, self).__init__()
+        self.weight = weight
+        
+    def forward(self, y_true, y_pred, src=None, dst=None, g=None, chr=None, multi=False):
+        """
+        Args:
+            y_true: Node labels (not used but included for API compatibility)
+            y_pred: Node predictions
+            src, dst, g, chr: Not used but included for API compatibility
+            multi: Not used but included for API compatibility
+        """
+        # Calculate the mean of predictions and square it to penalize deviation from 0
+        mean_pred = y_pred.mean()
+        mean_zero_loss = mean_pred ** 2
+        
+        return self.weight * mean_zero_loss
+    
 class TripletLoss(nn.Module):
     """Triplet contrastive loss for node predictions.
     

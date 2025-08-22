@@ -11,13 +11,11 @@ import numpy as np
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
-from torch_geometric.utils import from_networkx
 from Bio import AlignIO
 import re
 from datetime import datetime
 import pandas as pd
-from torch_geometric.data import Data
-from torch_geometric.utils import degree
+
 import scipy.stats
 import scipy.signal
 
@@ -350,6 +348,7 @@ class HicDatasetCreator:
                          "--outdir", self.hic_sample_path, "-w", self.tmp_path, "-profile docker"])
 
         # call nextflow, this should finish when the pipeline is done
+        print(call)
         subprocess.run(call, shell=True, check=False, cwd=self.root_path)
 
     def _write_nf_config(self, filename="nextflow.config") -> os.PathLike:
@@ -1325,6 +1324,8 @@ class HicDatasetCreator:
     
     
     def save_to_dgl_and_pyg(self, nx_graph):
+        from torch_geometric.data import Data
+        from torch_geometric.utils import degree
         print()
         print(f"Total nodes in graph: {nx_graph.number_of_nodes()}")
         # Assert that nx_graph is a multigraph

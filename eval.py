@@ -4,6 +4,111 @@ from sklearn.metrics.cluster import contingency_matrix
 from scipy.optimize import linear_sum_assignment
 from itertools import combinations
 from collections import Counter
+import subprocess
+import re
+
+def parse_minigraph_result(stat_path):
+    nga50 = 0
+    ng50 = 0
+    length = 0
+    rdup = 0
+    with open(stat_path) as f:
+        for line in f.readlines():
+            if line.startswith('NG50'):
+                try:
+                    ng50 = int(re.findall(r'NG50\s*(\d+)', line)[0])
+                except IndexError:
+                    ng50 = 0
+            if line.startswith('NGA50'):
+                try:
+                    nga50 = int(re.findall(r'NGA50\s*(\d+)', line)[0])
+                except IndexError:
+                    nga50 = 0
+            if line.startswith('Length'):
+                try:
+                    length = int(re.findall(r'Length\s*(\d+)', line)[0])
+                except IndexError:
+                    length = 0
+            if line.startswith('Rdup'):
+                try:
+                    rdup = float(re.findall(r'Rdup\s*(\d+\.\d+)', line)[0])
+                except IndexError:
+                    rdup = 0
+
+    return ng50, nga50, length, rdup
+
+def parse_yak_result(yakres_path):
+    """
+    Yak triobinning result files have following info:
+    C       F  seqName     type      startPos  endPos    count
+    C       W  #switchErr  denominator  switchErrRate
+    C       H  #hammingErr denominator  hammingErrRate
+    C       N  #totPatKmer #totMatKmer  errRate
+    """
+    switch_err = None
+    hamming_err = None
+
+    with open(yakres_path, 'r') as file:
+        # Read all the lines and reverse them
+        lines = file.readlines()
+        reversed_lines = reversed(lines)
+
+        for line in reversed_lines:
+            if line.startswith('W'):
+                switch_err = float(line.split()[3])
+            elif line.startswith('H'):
+                hamming_err = float(line.split()[3])
+
+            if switch_err is not None and hamming_err is not None:
+                break
+
+    return switch_err, hamming_err
+
+def run_yak(mat_yak, pat_yak, asm, outfile, yak_path, threads=8):
+    cmd = f'{yak_path} trioeval -t{threads} {pat_yak} {mat_yak} {asm} > {outfile}'.split(' ')
+    with open(outfile, 'w') as f:
+        p = subprocess.Popen(cmd, stdout=f)
+    return p
+
+def parse_minigraph_for_full(report, save_path=None, directory=None, filename='0_minigraph.txt'):
+    stat_path = report
+    with open(stat_path) as f:
+        report = f.read()
+        print(report)
+
+def run_minigraph(ref, asm, paf, minigraph_path=None):
+    if minigraph_path:
+        cmd = f'{minigraph_path} -t32 -xasm -g10k -r10k --show-unmap=yes {ref} {asm}'.split(' ')
+    else:
+        cmd = f'minigraph -t32 -xasm -g10k -r10k --show-unmap=yes {ref} {asm}'.split(' ')
+    with open(paf, 'w') as f:
+        p = subprocess.Popen(cmd, stdout=f)
+    return p
+
+def parse_pafs(idx, report, paf, paf_path=None):
+    if paf_path and paf_path != 'None':
+        cmd = f'k8 {paf_path} asmstat {idx} {paf}'.split()
+    else:
+        cmd = f'paftools.js asmstat {idx} {paf}'.split()
+
+    with open(report, 'w') as f:
+        p = subprocess.Popen(cmd, stdout=f)
+    return p
+
+def parse_real_results(mat_report, pat_report, mat_phs, pat_phs):
+    ng50_m, nga50_m, length_m, rdup_m = parse_minigraph_result(mat_report)
+    ng50_p, nga50_p, length_p, rdup_p = parse_minigraph_result(pat_report)
+    switch_err_m, hamming_err_m = parse_yak_result(mat_phs)
+    switch_err_p, hamming_err_p = parse_yak_result(pat_phs)
+    print(f'Results:')
+    print(f'Length: M:{"{:,}".format(length_m)} P:{"{:,}".format(length_p)} Avg:{"{:,}".format((length_m + length_p) // 2)}')
+    print(f'Rdup: M:{rdup_m:.4f} P:{rdup_p:.4f} Avg:{(rdup_m + rdup_p) / 2:.4f}')
+    print(f'NG50: M:{"{:,}".format(ng50_m)} P:{"{:,}".format(ng50_p)} Avg:{"{:,}".format((ng50_m + ng50_p) // 2)}')
+    print(f'NGA50: M:{"{:,}".format(nga50_m)} P:{"{:,}".format(nga50_p)} Avg:{"{:,}".format((nga50_m + nga50_p) // 2)}')
+    print(f'YAK Switch Err: M:{switch_err_m * 100:.4f}% P:{switch_err_p * 100:.4f}% Avg:{(switch_err_m + switch_err_p) / 2 * 100:.4f}%')
+    print(f'YAK Hamming Err: M:{hamming_err_m * 100:.4f}% P:{hamming_err_p * 100:.4f}% Avg:{(hamming_err_m + hamming_err_p) / 2 * 100:.4f}%')
+    #print(f'MERYL Switch Err: M:{mat_switch_error:.4f}% P:{pat_switch_error:.4f}% Avg:{(mat_switch_error + pat_switch_error) / 2:.4f}%')
+
 
 def clustering_metrics(true_labels, pred_labels):
     """
